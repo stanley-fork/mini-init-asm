@@ -1,0 +1,113 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-amd64:
+    name: Build amd64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm make binutils
+
+      - name: Build amd64 binary
+        run: |
+          make build-amd64
+          strip build/mini-init-amd64
+
+      - name: Upload amd64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mini-init-amd64-${{ github.sha }}
+          path: build/mini-init-amd64
+          if-no-files-found: error
+          retention-days: 7
+
+  build-arm64:
+    name: Build arm64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross-compile dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm make binutils gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Build arm64 binary
+        run: |
+          make build-arm64
+          aarch64-linux-gnu-strip build/mini-init-arm64
+
+      - name: Upload arm64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mini-init-arm64-${{ github.sha }}
+          path: build/mini-init-arm64
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Release
+    needs: [build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mini-init-amd64-${{ github.sha }}
+          path: release
+
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mini-init-arm64-${{ github.sha }}
+          path: release
+
+      - name: Prepare release assets
+        run: |
+          cd release
+          sha256sum mini-init-amd64 > mini-init-amd64.sha256
+          sha256sum mini-init-arm64 > mini-init-arm64.sha256
+          cat > RELEASE_NOTES.txt <<EOF
+          Release: ${GITHUB_REF_NAME}
+          Commit: ${GITHUB_SHA}
+          Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          Binaries:
+          - mini-init-amd64 (x86-64 Linux)
+          - mini-init-arm64 (AArch64/ARM64 Linux)
+
+          Usage:
+          ./mini-init-amd64 --version
+          ./mini-init-arm64 --version
+          EOF
+          ls -lh .
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: release/RELEASE_NOTES.txt
+          files: |
+            release/mini-init-amd64
+            release/mini-init-amd64.sha256
+            release/mini-init-arm64
+            release/mini-init-arm64.sha256

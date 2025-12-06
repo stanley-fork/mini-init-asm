@@ -1,0 +1,29 @@
+# Multi-architecture Dockerfile for mini-init
+# Build with: docker buildx build --platform linux/amd64,linux/arm64 -t mini-init:latest -f docker/Dockerfile.multiarch .
+# Buildx will build separate images for each platform automatically
+
+# Builder stage
+FROM --platform=$BUILDPLATFORM debian:stable-slim AS builder
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nasm make binutils \
+    $(if [ "$TARGETPLATFORM" = "linux/arm64" ]; then echo "gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu"; fi) && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+# Build for the target platform
+RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        make build-arm64 && \
+        aarch64-linux-gnu-strip build/mini-init-arm64 && \
+        cp build/mini-init-arm64 /mini-init; \
+    else \
+        make && \
+        strip build/mini-init-amd64 && \
+        cp build/mini-init-amd64 /mini-init; \
+    fi
+
+# Runtime stage
+FROM scratch
+COPY --from=builder /mini-init /mini-init
+ENTRYPOINT ["/mini-init"]

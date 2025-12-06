@@ -1,0 +1,184 @@
+default:
+  image: debian:13-slim
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends nasm make binutils bash ca-certificates
+    - update-ca-certificates
+  timeout: 20 minutes
+  tags:
+    - docker
+    - dev
+
+stages:
+  - build
+  - test
+  - release
+
+build:amd64:
+  stage: build
+  script:
+    - make
+    - strip build/mini-init-amd64
+  artifacts:
+    name: "mini-init-amd64-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - build/mini-init-amd64
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+
+build:arm64:
+  stage: build
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends nasm make binutils bash ca-certificates gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+    - update-ca-certificates
+  script:
+    - make build-arm64
+    - aarch64-linux-gnu-strip build/mini-init-arm64
+    - aarch64-linux-gnu-strip build/arm64/helper-exit42 || true
+    - aarch64-linux-gnu-strip build/arm64/helper-sleeper || true
+  artifacts:
+    name: "mini-init-arm64-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - build/mini-init-arm64
+      - build/arm64/helper-exit42
+      - build/arm64/helper-sleeper
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+
+test:e2e:
+  stage: test
+  needs: ["build:amd64"]
+  script:
+    - bash scripts/test_harness.sh build/mini-init-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - if: $CI_COMMIT_TAG
+    - when: never
+
+test:ep_signals:
+  stage: test
+  needs: ["build:amd64"]
+  script:
+    - chmod +x scripts/test_ep_signals.sh
+    - bash scripts/test_ep_signals.sh build/mini-init-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - if: $CI_COMMIT_TAG
+    - when: never
+
+test:edge_cases:
+  stage: test
+  needs: ["build:amd64"]
+  script:
+    - chmod +x scripts/test_edge_cases.sh
+    - bash scripts/test_edge_cases.sh build/mini-init-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - if: $CI_COMMIT_TAG
+    - when: never
+
+test:exit_code_mapping:
+  stage: test
+  needs: ["build:amd64"]
+  script:
+    - chmod +x scripts/test_exit_code_mapping.sh
+    - bash scripts/test_exit_code_mapping.sh build/mini-init-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - if: $CI_COMMIT_TAG
+    - when: never
+
+test:restart:
+  stage: test
+  needs: ["build:amd64"]
+  script:
+    - chmod +x scripts/test_restart.sh
+    - bash scripts/test_restart.sh build/mini-init-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - if: $CI_COMMIT_TAG
+    - when: never
+
+test:arm64:
+  stage: test
+  needs: ["build:arm64"]
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends qemu-user-static file
+  script:
+    - chmod +x scripts/test_harness_arm64.sh
+    - ARM64_FALLBACK=${ARM64_FALLBACK:-1} EP_ARM64_FALLBACK=${EP_ARM64_FALLBACK:-1} bash scripts/test_harness_arm64.sh build/mini-init-arm64
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - if: $CI_COMMIT_TAG
+    - when: never
+
+release:
+  stage: release
+  needs:
+    - build:amd64
+    - build:arm64
+    - test:e2e
+    - test:ep_signals
+    - test:edge_cases
+    - test:exit_code_mapping
+    - test:restart
+    #- test:arm64
+  script:
+    - |
+      echo "Creating release for tag $CI_COMMIT_TAG"
+      mkdir -p release
+      cp build/mini-init-amd64 release/mini-init-amd64
+      cp build/mini-init-arm64 release/mini-init-arm64
+      # Create checksums
+      sha256sum release/mini-init-amd64 > release/mini-init-amd64.sha256
+      sha256sum release/mini-init-arm64 > release/mini-init-arm64.sha256
+      # Create a simple release notes file
+      cat > release/RELEASE_NOTES.txt <<EOF
+      Release: $CI_COMMIT_TAG
+      Commit: $CI_COMMIT_SHA
+      Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+      Binaries:
+      - mini-init-amd64 (x86-64 Linux)
+      - mini-init-arm64 (AArch64/ARM64 Linux)
+
+      Usage:
+      ./mini-init-amd64 --version
+      ./mini-init-arm64 --version
+      EOF
+      cat release/RELEASE_NOTES.txt
+      ls -lh release/
+  artifacts:
+    name: "mini-init-$CI_COMMIT_TAG"
+    paths:
+      - release/
+    expire_in: never
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/
