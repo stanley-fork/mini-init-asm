@@ -19,6 +19,7 @@ This document tracks planned features and improvements for `mini-init-asm`.
 - Instrumentation shows execution reaches `get_timestamp_ptr`/epoll setup, then no further syscalls; QEMU SIGILL is likely emulator-specific.
 - Added `EP_ARM64_FALLBACK`/`ARM64_FALLBACK` env to skip the QEMU smoke in CI while keeping native behavior unchanged.
 - Implemented a safer path: removed `msub` usage and made `EP_ARM64_FALLBACK=1` omit timestamp formatting to avoid QEMU-user issues.
+- Note: even in fallback mode (`EP_ARM64_FALLBACK=1`), QEMU-user may still SIGILL on some runners; CI treats SIGILL/timeout as a non-fatal skip while still running helper binaries and `--version`.
 - Next: validate on native ARM64 hardware or full-system QEMU; try newer QEMU user-mode if emulation still fails.
 
 ---
