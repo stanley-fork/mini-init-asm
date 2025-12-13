@@ -4,12 +4,12 @@ BIN="${1:-./build/mini-init-amd64}"
 
 echo "[test] 1) Graceful termination"
 set -m
-EP_GRACE_SECONDS=5 $BIN -v -- /bin/bash scripts/fixtures/trap_exit0.sh &
+EP_GRACE_SECONDS=5 "$BIN" -v -- /bin/bash scripts/fixtures/trap_exit0.sh &
 pid=$!
 sleep 1
-kill -TERM $pid
+kill -TERM "$pid"
 set +e
-wait $pid
+wait "$pid"
 wait_rc=$?
 set -e
 echo "[test] rc=$wait_rc"
@@ -17,12 +17,12 @@ echo "[test] rc=$wait_rc"
 test "$wait_rc" -eq 0
 
 echo "[test] 2) Escalation after grace (app ignores TERM)"
-EP_GRACE_SECONDS=1 $BIN -v -- /bin/bash -c 'trap "" TERM INT HUP QUIT; while :; do sleep 5; done' &
+EP_GRACE_SECONDS=1 "$BIN" -v -- /bin/bash -c 'trap "" TERM INT HUP QUIT; while :; do sleep 5; done' &
 pid=$!
 sleep 1
-kill -TERM $pid
+kill -TERM "$pid"
 set +e
-wait $pid
+wait "$pid"
 wait_rc=$?
 set -e
 echo "[test] rc=$wait_rc"
@@ -30,12 +30,12 @@ test "$wait_rc" -eq 137
 echo "[test] OK (got 137)"
 
 echo "[test] 3) Forward custom EP_SIGNALS=USR1"
-EP_SIGNALS=USR1 $BIN -v -- /bin/bash -c 'trap "echo got USR1; exit 0" USR1; sleep 99' &
+EP_SIGNALS=USR1 "$BIN" -v -- /bin/bash -c 'trap "echo got USR1; exit 0" USR1; sleep 99' &
 pid=$!
 sleep 1
-kill -USR1 $pid
+kill -USR1 "$pid"
 set +e
-wait $pid
+wait "$pid"
 wait_rc=$?
 set -e
 echo "[test] rc=$wait_rc"

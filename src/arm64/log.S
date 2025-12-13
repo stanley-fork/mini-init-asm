@@ -42,7 +42,8 @@ log_prefix_num:
 
 .conv_loop:
     udiv x28, x0, x26
-    msub x27, x28, x26, x0
+    mul x27, x28, x26
+    sub x27, x0, x27
     add w27, w27, #'0'
     sub x25, x25, #1
     strb w27, [x25]

@@ -13,14 +13,17 @@ align 8
 wait_status:    resq 1
 
 section .text
-; Loop wait4(-1, &status, WNOHANG, NULL) until no child
-; Returns:
-;   rax = 0 if no child reaped
-;   rax > 0 returns last reaped pid (not necessarily main child)
-; Side-effect: stores status in [wait_status]
+; Loop wait4(-1, &status, WNOHANG, NULL) until no child.
+; In:  rdi = main_child_pid
+; Out: rax = main_child_pid if reaped, else 0
+; Side-effect: if main child was reaped, stores its status in [wait_status]
 reap_children_nonblock:
     push rbx
-    mov rbx, 0          ; last pid
+    push r12
+    push r13
+    mov r12, rdi        ; main pid
+    xor rbx, rbx        ; found pid (0/ pid)
+    xor r13, r13        ; saved main status
   .again:
     mov rdi, -1
     lea rsi, [rel wait_status]
@@ -31,13 +34,24 @@ reap_children_nonblock:
     jg   .got           ; pid reaped
     cmp rax, 0
     je   .done          ; no child ready
-    ; rax < 0 -> error (no children)
+    ; rax < 0 -> error
+    cmp rax, -EINTR
+    je  .again
     jmp  .done
   .got:
+    cmp rax, r12
+    jne .again
     mov rbx, rax
+    mov r13, [rel wait_status]
     jmp .again
   .done:
+    test rbx, rbx
+    jz .out
+    mov [rel wait_status], r13
+  .out:
     mov rax, rbx
+    pop r13
+    pop r12
     pop rbx
     ret
 

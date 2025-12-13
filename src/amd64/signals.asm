@@ -102,6 +102,16 @@ setup_signals_and_fd:
     mov r9, rsi          ; token end (points to delimiter or NUL)
     mov rcx, r9
     sub rcx, r8          ; token length
+    ; trim trailing spaces
+  .trim_end:
+    cmp rcx, 0
+    jle .after_token
+    mov al, [r8 + rcx - 1]
+    cmp al, ' '
+    jne .trim_done
+    dec rcx
+    jmp .trim_end
+  .trim_done:
     cmp rcx, 0
     jle .after_token
     cmp rcx, 15          ; max token size (buffer 16 incl NUL)
@@ -205,11 +215,13 @@ setup_signals_and_fd:
     jne .unknown_tok
     ; Parse number after "RT"
     lea rsi, [rbx+2]
-    call parse_u64_dec
-    ; Validate range: 1-31 (SIGRTMIN+1 to SIGRTMIN+31)
+    call parse_u64_dec_checked
+    test rdx, rdx
+    jz .unknown_tok
+    ; Validate range: 1..(SIGRTMAX-SIGRTMIN) (SIGRTMIN+1..SIGRTMAX)
     cmp rax, 0
     je .unknown_tok
-    cmp rax, 31
+    cmp rax, (SIGRTMAX - SIGRTMIN)
     ja .unknown_tok
     ; Calculate SIGRTMIN + number
     add rax, SIGRTMIN

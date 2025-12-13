@@ -176,14 +176,16 @@ mini-init-{amd64|arm64} [--verbose|-v] [--version|-V] -- <command> [args...]
 
 ### Environment variables
 
+Numeric env vars are parsed as **non-negative decimal**. If a value is invalid/overflows, it is ignored (defaults apply); in verbose mode a warning is logged. Timer-related values (grace/backoff seconds) are clamped to fit in signed 64-bit seconds.
+
 - `EP_GRACE_SECONDS`
   Grace period (in seconds) from the *first* forwarded soft signal to `SIGKILL` escalation.
   Default: `10`.
 
 - `EP_SIGNALS`
   CSV of **additional** signal names to monitor/forward (case-sensitive).
-  Supported names: `USR1,USR2,PIPE,WINCH,TTIN,TTOU,CONT,ALRM,RT1,...,RT31`
-  (`RTN` = `SIGRTMIN+N`, 1–31).
+  Supported names: `USR1,USR2,PIPE,WINCH,TTIN,TTOU,CONT,ALRM,RT1,...,RT30`
+  (`RTN` = `SIGRTMIN+N`, 1–30).
   These **augment** the built-in set: `HUP,INT,QUIT,TERM,CHLD` plus default forwarding
   of `USR1,USR2,PIPE,WINCH,TTIN,TTOU,CONT,ALRM`.
   Unknown tokens are ignored with a warning. In verbose mode we only log
@@ -192,12 +194,14 @@ mini-init-{amd64|arm64} [--verbose|-v] [--version|-V] -- <command> [args...]
 - `EP_SUBREAPER`
   If set to `1`, enables `PR_SET_CHILD_SUBREAPER` so that `mini-init-asm` adopts orphaned
   grandchildren. Useful when nested processes need proper reaping.
+  `mini-init-asm` still exits when the main child exits (it does not wait indefinitely for adopted descendants).
   Default: disabled.
 
 - `EP_EXIT_CODE_BASE`
   Base value for mapping “killed by signal” to exit code:
   `exit_code = EP_EXIT_CODE_BASE + signal_number` (default base `128`, like shells).
   For example, `SIGKILL` (9) with base 200 → exit code 209.
+  Valid range: `0..255` (out-of-range values are ignored; default applies).
 
 - `EP_RESTART_ENABLED`
   If set to `1`, enables **restart-on-crash**: when the child is killed by a signal
@@ -219,6 +223,8 @@ mini-init-{amd64|arm64} [--verbose|-v] [--version|-V] -- <command> [args...]
 - `EP_ARM64_FALLBACK` (ARM64/QEMU only)
   If set to `1`, ARM64 builds skip the epoll/signalfd path and use a simpler
   `wait4` loop. Intended as a workaround for QEMU user-mode flakiness in CI smoke tests.
+  This mode does **not** provide the full signal-forwarding/grace-timer behavior; it primarily verifies spawn + exit-code propagation.
+  In fallback mode, verbose logs may omit timestamps to avoid QEMU-user emulation issues.
   Default: `0` (CI jobs typically set this).
 
 ### Examples

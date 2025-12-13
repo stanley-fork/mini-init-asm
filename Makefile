@@ -55,6 +55,7 @@ test-all: test-amd64
 	bash scripts/test_edge_cases.sh $(BUILD_DIR)/$(TARGET_AMD64)
 	bash scripts/test_exit_code_mapping.sh $(BUILD_DIR)/$(TARGET_AMD64)
 	bash scripts/test_restart.sh $(BUILD_DIR)/$(TARGET_AMD64)
+	bash scripts/test_diagnostics.sh $(BUILD_DIR)/$(TARGET_AMD64)
 
 $(AMD64_BUILD_DIR):
 	mkdir -p $@

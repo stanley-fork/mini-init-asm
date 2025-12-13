@@ -27,7 +27,7 @@
     bl get_timestamp_ptr
     mov x1, x0
     mov x0, #2
-    mov x2, #19
+    mov x2, #18
     SYSCALL SYS_write
     mov x0, #2
     adrp x1, \msg_ptr

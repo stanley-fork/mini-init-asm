@@ -25,6 +25,7 @@
 // epoll/op flags
 .equ EPOLL_CTL_ADD, 1
 .equ EPOLLIN,       1
+.equ EPOLL_CLOEXEC, 02000000
 
 // sigprocmask how
 .equ SIG_BLOCK,     0
@@ -56,6 +57,10 @@
 .equ SIGWINCH, 28
 .equ SIGRTMIN, 34
 .equ SIGRTMAX, 64
+
+// errno subset
+.equ ESRCH, 3
+.equ EINTR, 4
 
 // timerfd/signalfd flags
 .equ TFD_CLOEXEC,   02000000

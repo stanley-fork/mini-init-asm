@@ -23,6 +23,7 @@
 ; epoll/op flags
 %define EPOLL_CTL_ADD 1
 %define EPOLLIN       1
+%define EPOLL_CLOEXEC  02000000o
 
 ; sigprocmask how
 %define SIG_BLOCK     0
@@ -56,6 +57,7 @@
 %define SIGRTMAX 64
 
 ; errno subset
+%define ESRCH         3
 %define EINTR         4
 
 ; timerfd/signalfd flags (octal per manpages)

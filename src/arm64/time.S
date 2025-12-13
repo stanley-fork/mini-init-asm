@@ -10,8 +10,15 @@ time_buffer:
 .align 2
 .global get_timestamp_ptr
 .extern g_verbose
+.extern g_arm64_fallback
 
 get_timestamp_ptr:
+    // In EP_ARM64_FALLBACK mode, avoid udiv-heavy timestamp formatting (QEMU-user workaround).
+    adrp x0, g_arm64_fallback
+    add x0, x0, :lo12:g_arm64_fallback
+    ldr x0, [x0]
+    cbnz x0, .blank
+
     adrp x0, g_verbose
     add x0, x0, :lo12:g_verbose
     ldr x0, [x0]
@@ -58,7 +65,8 @@ get_timestamp_ptr:
     mov x4, #10
 .sec_loop:
     udiv x5, x0, x1
-    msub x6, x5, x1, x0
+    mul x6, x5, x1
+    sub x6, x0, x6
     add x6, x6, #'0'
     strb w6, [x3]
     sub x3, x3, #1
@@ -77,7 +85,8 @@ get_timestamp_ptr:
     mov x4, #6
 .micro_loop:
     udiv x5, x0, x1
-    msub x6, x5, x1, x0
+    mul x6, x5, x1
+    sub x6, x0, x6
     add x6, x6, #'0'
     strb w6, [x3]
     sub x3, x3, #1
@@ -104,4 +113,18 @@ get_timestamp_ptr:
     add x0, x0, :lo12:time_buffer
     mov w1, #0
     strb w1, [x0]
+    ret
+
+.blank:
+    adrp x0, time_buffer
+    add x0, x0, :lo12:time_buffer
+    mov x1, #0
+    mov w2, #' '
+.blank_loop:
+    cmp x1, #18
+    bge .blank_done
+    strb w2, [x0, x1]
+    add x1, x1, #1
+    b .blank_loop
+.blank_done:
     ret

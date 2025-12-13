@@ -41,7 +41,7 @@ if ! file "build/arm64/helper-exit42" | grep -q "ARM aarch64"; then
     exit 1
 fi
 set +e
-$QEMU -- build/arm64/helper-exit42
+"$QEMU" -- build/arm64/helper-exit42
 helper_rc=$?
 set -e
 if [ "$helper_rc" -ne 42 ]; then
@@ -51,14 +51,36 @@ fi
 
 # Optional: fallback mode to skip flaky QEMU epoll/signalfd path
 if [ "$ARM64_FALLBACK" = "1" ]; then
-    echo "[test] WARNING: EP_ARM64_FALLBACK=1 set; skipping mini-init smoke under QEMU"
+    echo "[test] WARNING: EP_ARM64_FALLBACK=1 set; running wait4-only smoke under QEMU"
+
+    echo "[test] 0) Version check"
+    set +e
+    timeout 5s "$QEMU" -- "$BIN" --version
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ]; then
+        echo "[test] ERROR: --version failed under QEMU (rc=$rc)"
+        exit 1
+    fi
+
+    echo "[test] 1) Wait4-only path (helper-exit42)"
+    set +e
+    timeout 10s env EP_ARM64_FALLBACK=1 "$QEMU" -- "$BIN" -v -- ./build/arm64/helper-exit42
+    rc=$?
+    set -e
+    if [ "$rc" -ne 42 ]; then
+        echo "[test] ERROR: Expected exit 42, got $rc"
+        exit 1
+    fi
+
+    echo "[test] OK (fallback smoke passed)"
     exit 0
 fi
 
 # Test 1: Basic execution (help-like check)
 echo "[test] 1) Basic execution"
 set +e
-timeout 10s $QEMU -- "$BIN" -v -- ./build/arm64/helper-exit42
+timeout 10s "$QEMU" -- "$BIN" -v -- ./build/arm64/helper-exit42
 rc=$?
 set -e
 if [ "$rc" -eq 42 ]; then
@@ -70,17 +92,17 @@ fi
 # Test 2: Graceful termination
 echo "[test] 2) Graceful termination"
 set -m
-EP_GRACE_SECONDS=5 timeout 15s $QEMU -- "$BIN" -v -- ./build/arm64/helper-sleeper &
+EP_GRACE_SECONDS=5 timeout 15s "$QEMU" -- "$BIN" -v -- ./build/arm64/helper-sleeper &
 pid=$!
 sleep 1
 # Check if process is still running before sending signal
-if kill -0 $pid 2>/dev/null; then
-    kill -TERM $pid 2>/dev/null || true
+if kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
 else
     echo "[test] WARNING: Process already exited before signal"
 fi
 set +e
-wait $pid 2>/dev/null || true
+wait "$pid" 2>/dev/null || true
 wait_rc=$?
 set -e
 echo "[test] rc=$wait_rc"
@@ -93,17 +115,17 @@ fi
 
 # Test 3: Escalation (simplified - may not work perfectly under QEMU)
 echo "[test] 3) Escalation check (may be flaky under QEMU)"
-EP_GRACE_SECONDS=1 timeout 10s $QEMU -- "$BIN" -v -- ./build/arm64/helper-sleeper &
+EP_GRACE_SECONDS=1 timeout 10s "$QEMU" -- "$BIN" -v -- ./build/arm64/helper-sleeper &
 pid=$!
 sleep 1
 # Check if process is still running before sending signal
-if kill -0 $pid 2>/dev/null; then
-    kill -TERM $pid 2>/dev/null || true
+if kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
 else
     echo "[test] WARNING: Process already exited before signal"
 fi
 set +e
-wait $pid 2>/dev/null || true
+wait "$pid" 2>/dev/null || true
 wait_rc=$?
 set -e
 echo "[test] rc=$wait_rc"

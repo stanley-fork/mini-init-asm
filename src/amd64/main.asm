@@ -25,11 +25,13 @@ extern log_prefix_num
 
 section .rodata
 usage_msg: db "usage: mini-init-amd64 [--verbose|-v] [--version|-V] -- <cmd> [args...]", 10, 0
-version_msg: db "mini-init-amd64 0.1.1", 10, 0
+version_msg: db "mini-init-amd64 0.2.0", 10, 0
 log_first_soft: db "DEBUG: first soft signal received", 10
 log_first_soft_len: equ $ - log_first_soft
 log_escalate_kill: db "DEBUG: escalating to SIGKILL", 10
 log_escalate_kill_len: equ $ - log_escalate_kill
+log_escalate_skip_dead_pgid: db "DEBUG: grace timer fired but PGID is gone; skipping SIGKILL", 10
+log_escalate_skip_dead_pgid_len: equ $ - log_escalate_skip_dead_pgid
 log_sigchld_ok:  db "DEBUG: SIGCHLD handled", 10
 log_sigchld_ok_len: equ $ - log_sigchld_ok
 log_restart:     db "DEBUG: restarting child", 10
@@ -38,6 +40,14 @@ log_max_restarts: db "DEBUG: max restarts reached, exiting", 10
 log_max_restarts_len: equ $ - log_max_restarts
 log_backoff_wait: db "DEBUG: waiting for backoff before restart", 10
 log_backoff_wait_len: equ $ - log_backoff_wait
+log_signal_prefix: db "DEBUG: signal=", 0
+log_signal_prefix_len: equ $ - log_signal_prefix - 1
+log_grace_secs_prefix: db "DEBUG: grace_seconds=", 0
+log_grace_secs_prefix_len: equ $ - log_grace_secs_prefix - 1
+log_restart_count_prefix: db "DEBUG: restart_count=", 0
+log_restart_count_prefix_len: equ $ - log_restart_count_prefix - 1
+log_restart_backoff_prefix: db "DEBUG: restart_backoff_seconds=", 0
+log_restart_backoff_prefix_len: equ $ - log_restart_backoff_prefix - 1
 log_debug_restart_enabled: db "DEBUG: restart_enabled=", 0
 log_debug_restart_enabled_len: equ $ - log_debug_restart_enabled - 1
 log_debug_wait_status: db "DEBUG: wait_status=", 0
@@ -49,6 +59,20 @@ log_debug_env_check_len: equ $ - log_debug_env_check - 1
 log_debug_value: db "DEBUG: value=", 0
 log_debug_value_len: equ $ - log_debug_value - 1
 log_newline: db 10
+log_warn_bad_grace: db "WARN: invalid EP_GRACE_SECONDS; using default", 10
+log_warn_bad_grace_len: equ $ - log_warn_bad_grace
+log_warn_clamp_grace: db "WARN: EP_GRACE_SECONDS too large; clamping", 10
+log_warn_clamp_grace_len: equ $ - log_warn_clamp_grace
+log_warn_bad_exit_base: db "WARN: invalid EP_EXIT_CODE_BASE; using default", 10
+log_warn_bad_exit_base_len: equ $ - log_warn_bad_exit_base
+log_warn_range_exit_base: db "WARN: EP_EXIT_CODE_BASE out of range (0..255); using default", 10
+log_warn_range_exit_base_len: equ $ - log_warn_range_exit_base
+log_warn_bad_max_restarts: db "WARN: invalid EP_MAX_RESTARTS; using default", 10
+log_warn_bad_max_restarts_len: equ $ - log_warn_bad_max_restarts
+log_warn_bad_backoff: db "WARN: invalid EP_RESTART_BACKOFF_SECONDS; using default", 10
+log_warn_bad_backoff_len: equ $ - log_warn_bad_backoff
+log_warn_clamp_backoff: db "WARN: EP_RESTART_BACKOFF_SECONDS too large; clamping", 10
+log_warn_clamp_backoff_len: equ $ - log_warn_clamp_backoff
 
 section .bss
 align 8
@@ -223,8 +247,21 @@ _start:
     jz .next_env
     ; rax points to value string
     mov rsi, rax
-    call parse_u64_dec
+    call parse_u64_dec_checked
+    test rdx, rdx
+    jz .bad_grace
+    test rax, rax
+    js .clamp_grace
     mov [g_grace_secs], rax
+    jmp .env_done
+.clamp_grace:
+    mov rax, 0x7fffffffffffffff
+    mov [g_grace_secs], rax
+    LOG log_warn_clamp_grace, log_warn_clamp_grace_len
+    jmp .env_done
+.bad_grace:
+    ; ignore invalid, keep default
+    LOG log_warn_bad_grace, log_warn_bad_grace_len
     jmp .env_done
 .next_env:
     add rbx, 8
@@ -273,8 +310,18 @@ _start:
     jz .next_exit_base_env
     ; rax points to value string
     mov rsi, rax
-    call parse_u64_dec
+    call parse_u64_dec_checked
+    test rdx, rdx
+    jz .bad_exit_base
+    cmp rax, 255
+    ja .range_exit_base
     mov [g_exit_code_base], rax
+    jmp .exit_base_done
+.range_exit_base:
+    LOG log_warn_range_exit_base, log_warn_range_exit_base_len
+    jmp .exit_base_done
+.bad_exit_base:
+    LOG log_warn_bad_exit_base, log_warn_bad_exit_base_len
     jmp .exit_base_done
 .next_exit_base_env:
     add rbx, 8
@@ -378,8 +425,13 @@ _start:
     jz .next_max_restarts_env
     ; rax points to value string
     mov rsi, rax
-    call parse_u64_dec
+    call parse_u64_dec_checked
+    test rdx, rdx
+    jz .bad_max_restarts
     mov [g_max_restarts], rax
+    jmp .max_restarts_done
+.bad_max_restarts:
+    LOG log_warn_bad_max_restarts, log_warn_bad_max_restarts_len
     jmp .max_restarts_done
 .next_max_restarts_env:
     add rbx, 8
@@ -398,8 +450,20 @@ _start:
     jz .next_restart_backoff_env
     ; rax points to value string
     mov rsi, rax
-    call parse_u64_dec
+    call parse_u64_dec_checked
+    test rdx, rdx
+    jz .bad_backoff
+    test rax, rax
+    js .clamp_backoff
     mov [g_restart_backoff], rax
+    jmp .restart_backoff_done
+.clamp_backoff:
+    mov rax, 0x7fffffffffffffff
+    mov [g_restart_backoff], rax
+    LOG log_warn_clamp_backoff, log_warn_clamp_backoff_len
+    jmp .restart_backoff_done
+.bad_backoff:
+    LOG log_warn_bad_backoff, log_warn_bad_backoff_len
     jmp .restart_backoff_done
 .next_restart_backoff_env:
     add rbx, 8
@@ -440,7 +504,12 @@ _start:
     jne .check_timer
     ; read signo
     call read_signalfd_once
-    mov rdx, rax           ; signo
+    push rax               ; save signo across log_prefix_num
+    mov rdx, [rsp]
+    lea rdi, [rel log_signal_prefix]
+    mov rsi, log_signal_prefix_len
+    call log_prefix_num
+    pop rdx
     cmp rdx, SIGCHLD
     je  .handle_chld
     ; if not a "soft shutdown" signal, just forward and continue
@@ -463,12 +532,10 @@ _start:
     mov rsi, rdx
     call forward_signal_to_group
     ; opportunistic reap: child may have exited immediately after soft signal
+    mov rdi, [g_child_pid]
     call reap_children_nonblock
-    cmp rax, 0
-    jle .after_opportunistic
-    mov rdx, [g_child_pid]
-    cmp rax, rdx
-    jne .after_opportunistic
+    test rax, rax
+    jz .after_opportunistic
     ; compute exit code and exit
     call get_wait_status_ptr
     mov rdi, [rax]
@@ -479,10 +546,21 @@ _start:
     mov rax, [g_child_status]
     EXIT rax
 .after_opportunistic:
+    ; If the main child already exited (e.g., crash + pending restart backoff),
+    ; treat any shutdown signal as "stop now" and do not restart.
+    cmp qword [g_child_exited], 1
+    jne .maybe_start_shutdown
+    mov rax, [g_child_status]
+    EXIT rax
+.maybe_start_shutdown:
     ; start shutdown on first soft signal
     cmp qword [g_shutdown], 1
     je .main_loop
     LOG log_first_soft, log_first_soft_len
+    mov rdx, [g_grace_secs]
+    lea rdi, [rel log_grace_secs_prefix]
+    mov rsi, log_grace_secs_prefix_len
+    call log_prefix_num
     ; create timerfd for grace window
     mov rdi, [g_grace_secs]
     call create_grace_timerfd
@@ -508,6 +586,12 @@ _start:
     mov rdi, [g_backoff_tfd]
     SYSCALL SYS_close
     mov qword [g_backoff_tfd], 0
+    ; If shutdown began while we were waiting for backoff, do not restart.
+    cmp qword [g_shutdown], 1
+    jne .do_backoff_restart
+    mov rax, [g_child_status]
+    EXIT rax
+.do_backoff_restart:
     ; Reset state for restart
     mov qword [g_child_exited], 0
     mov qword [g_shutdown], 0
@@ -522,6 +606,10 @@ _start:
     mov rax, [g_restart_count]
     inc rax
     mov [g_restart_count], rax
+    mov rdx, rax
+    lea rdi, [rel log_restart_count_prefix]
+    mov rsi, log_restart_count_prefix_len
+    call log_prefix_num
     LOG log_restart, log_restart_len
     jmp .main_loop
 .check_grace_timer:
@@ -537,6 +625,22 @@ _start:
     ; if child not exited yet -> kill -KILL
     cmp qword [g_child_exited], 1
     je .main_loop
+
+    ; avoid killing a reused PGID: if kill(-pgid, 0) reports ESRCH, skip escalation
+    mov rax, [g_child_pid]
+    neg rax
+    mov rdi, rax
+    xor rsi, rsi
+    SYSCALL SYS_kill
+    test rax, rax
+    jns .do_escalate
+    mov rbx, rax
+    neg rbx
+    cmp rbx, ESRCH
+    jne .do_escalate
+    LOG log_escalate_skip_dead_pgid, log_escalate_skip_dead_pgid_len
+    jmp .main_loop
+.do_escalate:
     LOG log_escalate_kill, log_escalate_kill_len
     mov rdi, [g_child_pid]
     mov rsi, SIGKILL
@@ -546,22 +650,19 @@ _start:
 
 .handle_chld:
     ; reap all
+    mov rdi, [g_child_pid]
     call reap_children_nonblock
-    cmp rax, 0
-    je .main_loop
-    ; is it our main child?
-    mov rdx, [g_child_pid]
-    cmp rax, rdx
-    jne .main_loop
-    ; Get wait status and save it on stack
+    test rax, rax
+    jz .main_loop
+    ; Get wait status
     call get_wait_status_ptr
     mov rdi, [rax]
-    push rdi              ; Save wait status on stack
+    mov r12, rdi          ; save raw wait status for restart logic/debug
     ; compute exit code
     call extract_exit_code
     mov [g_child_status], rax
     mov qword [g_child_exited], 1
-    
+
     ; Debug: log restart_enabled, shutdown, and wait_status
     mov rdx, [g_restart_enabled]
     lea rdi, [rel log_debug_restart_enabled]
@@ -571,24 +672,21 @@ _start:
     lea rdi, [rel log_debug_shutdown]
     mov rsi, log_debug_shutdown_len
     call log_prefix_num
-    pop rax               ; Get wait status for debug
-    push rax              ; Put it back
-    mov rdx, rax
+    mov rdx, r12
     lea rdi, [rel log_debug_wait_status]
     mov rsi, log_debug_wait_status_len
     call log_prefix_num
-    
+
     ; Check if we should restart (only if restart enabled, not in shutdown, and child was killed by signal)
     cmp qword [g_restart_enabled], 1
-    jne .no_restart_pop
+    jne .no_restart
     cmp qword [g_shutdown], 1
-    je .no_restart_pop
-    ; Check if child was killed by signal (not normal exit) - use saved wait status
-    pop rax               ; Restore wait status from stack
-    push rax              ; Save it again for potential reuse
+    je .no_restart
+    ; Check if child was killed by signal (not normal exit)
+    mov rax, r12
     and rax, 0x7f
     cmp rax, 0
-    je .no_restart_pop  ; Normal exit, don't restart
+    je .no_restart  ; Normal exit, don't restart
     ; Check max restarts
     mov rax, [g_max_restarts]
     test rax, rax
@@ -601,8 +699,13 @@ _start:
     mov rax, [g_restart_backoff]
     test rax, rax
     jz .restart_immediately
+    mov r9, rax
+    mov rdx, r9
+    lea rdi, [rel log_restart_backoff_prefix]
+    mov rsi, log_restart_backoff_prefix_len
+    call log_prefix_num
     ; Create backoff timerfd
-    mov rdi, rax
+    mov rdi, r9
     call create_grace_timerfd
     mov [g_backoff_tfd], rax
     test rax, rax
@@ -611,11 +714,9 @@ _start:
     mov rdi, [g_epfd]
     mov rsi, [g_backoff_tfd]
     call epoll_add_fd
-    pop rax               ; Clean up stack (wait status) before backoff wait
     LOG log_backoff_wait, log_backoff_wait_len
     jmp .main_loop
 .restart_immediately:
-    pop rax               ; Clean up stack (wait status)
     ; Reset state for restart
     mov qword [g_child_exited], 0
     mov qword [g_shutdown], 0
@@ -630,13 +731,14 @@ _start:
     mov rax, [g_restart_count]
     inc rax
     mov [g_restart_count], rax
+    mov rdx, rax
+    lea rdi, [rel log_restart_count_prefix]
+    mov rsi, log_restart_count_prefix_len
+    call log_prefix_num
     LOG log_restart, log_restart_len
     jmp .main_loop
 .max_restarts_reached:
-    pop rax               ; Clean up stack
     LOG log_max_restarts, log_max_restarts_len
-.no_restart_pop:
-    pop rax               ; Clean up stack (wait status)
 .no_restart:
     ; if we escalated to SIGKILL, force exit code (base+9)
     cmp qword [g_killed], 1

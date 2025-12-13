@@ -6,6 +6,7 @@
 .global _start
 .global g_verbose
 .global g_exit_code_base
+.global g_arm64_fallback
 
 .extern do_spawn
 .extern forward_signal_to_group
@@ -23,17 +24,20 @@
 .extern log_prefix_num
 .extern get_timestamp_ptr
 .extern parse_u64_dec
+.extern parse_u64_dec_checked
 .extern set_sig_bit
 
 .section .rodata
 .align 3
 usage_msg:         .asciz "usage: mini-init-arm64 [--verbose|-v] [--version|-V] -- <cmd> [args...]"
 .equ usage_msg_len, . - usage_msg - 1
-version_msg:       .asciz "mini-init-arm64 0.1.1"
+version_msg:       .asciz "mini-init-arm64 0.2.0"
 log_first_soft:    .asciz "DEBUG: first soft signal received"
 .equ log_first_soft_len, . - log_first_soft - 1
 log_escalate_kill: .asciz "DEBUG: escalating to SIGKILL"
 .equ log_escalate_kill_len, . - log_escalate_kill - 1
+log_escalate_skip_dead_pgid: .asciz "DEBUG: grace timer fired but PGID is gone; skipping SIGKILL"
+.equ log_escalate_skip_dead_pgid_len, . - log_escalate_skip_dead_pgid - 1
 log_sigchld_ok:    .asciz "DEBUG: SIGCHLD handled"
 .equ log_sigchld_ok_len, . - log_sigchld_ok - 1
 log_restart:       .asciz "DEBUG: restarting child"
@@ -42,6 +46,28 @@ log_max_restarts:  .asciz "DEBUG: max restarts reached, exiting"
 .equ log_max_restarts_len, . - log_max_restarts - 1
 log_backoff_wait:  .asciz "DEBUG: waiting for backoff before restart"
 .equ log_backoff_wait_len, . - log_backoff_wait - 1
+log_signal_prefix: .asciz "DEBUG: signal="
+.equ log_signal_prefix_len, . - log_signal_prefix - 1
+log_grace_secs_prefix: .asciz "DEBUG: grace_seconds="
+.equ log_grace_secs_prefix_len, . - log_grace_secs_prefix - 1
+log_restart_count_prefix: .asciz "DEBUG: restart_count="
+.equ log_restart_count_prefix_len, . - log_restart_count_prefix - 1
+log_restart_backoff_prefix: .asciz "DEBUG: restart_backoff_seconds="
+.equ log_restart_backoff_prefix_len, . - log_restart_backoff_prefix - 1
+log_warn_bad_grace: .asciz "WARN: invalid EP_GRACE_SECONDS; using default"
+.equ log_warn_bad_grace_len, . - log_warn_bad_grace - 1
+log_warn_clamp_grace: .asciz "WARN: EP_GRACE_SECONDS too large; clamping"
+.equ log_warn_clamp_grace_len, . - log_warn_clamp_grace - 1
+log_warn_bad_exit_base: .asciz "WARN: invalid EP_EXIT_CODE_BASE; using default"
+.equ log_warn_bad_exit_base_len, . - log_warn_bad_exit_base - 1
+log_warn_range_exit_base: .asciz "WARN: EP_EXIT_CODE_BASE out of range (0..255); using default"
+.equ log_warn_range_exit_base_len, . - log_warn_range_exit_base - 1
+log_warn_bad_max_restarts: .asciz "WARN: invalid EP_MAX_RESTARTS; using default"
+.equ log_warn_bad_max_restarts_len, . - log_warn_bad_max_restarts - 1
+log_warn_bad_backoff: .asciz "WARN: invalid EP_RESTART_BACKOFF_SECONDS; using default"
+.equ log_warn_bad_backoff_len, . - log_warn_bad_backoff - 1
+log_warn_clamp_backoff: .asciz "WARN: EP_RESTART_BACKOFF_SECONDS too large; clamping"
+.equ log_warn_clamp_backoff_len, . - log_warn_clamp_backoff - 1
 log_after_sfd:     .asciz "DEBUG: after setup_signals_and_fd"
 .equ log_after_sfd_len, . - log_after_sfd - 1
 log_fallback:      .asciz "DEBUG: using ARM64 fallback (wait4-only)"
@@ -286,11 +312,23 @@ _start:
     bl prefix_match
     cbz x0, .next_env
     mov x1, x0
-    bl parse_u64_dec
+    bl parse_u64_dec_checked
+    cbz x1, .bad_grace
+    tbnz x0, #63, .clamp_grace
     adrp x2, g_grace_secs
     add x2, x2, :lo12:g_grace_secs
     str x0, [x2]
     b .env_done
+.clamp_grace:
+    mov x0, #0x7fffffffffffffff
+    adrp x2, g_grace_secs
+    add x2, x2, :lo12:g_grace_secs
+    str x0, [x2]
+    LOG log_warn_clamp_grace, log_warn_clamp_grace_len
+    b .env_done
+.bad_grace:
+    LOG log_warn_bad_grace, log_warn_bad_grace_len
+    b .next_env
 .next_env:
     add x23, x23, #8
     b .find_env
@@ -336,11 +374,20 @@ _start:
     bl prefix_match
     cbz x0, .next_exit_base_env
     mov x1, x0
-    bl parse_u64_dec
+    bl parse_u64_dec_checked
+    cbz x1, .bad_exit_base
+    cmp x0, #255
+    bgt .range_exit_base
     adrp x2, g_exit_code_base
     add x2, x2, :lo12:g_exit_code_base
     str x0, [x2]
     b .exit_base_done
+.range_exit_base:
+    LOG log_warn_range_exit_base, log_warn_range_exit_base_len
+    b .exit_base_done
+.bad_exit_base:
+    LOG log_warn_bad_exit_base, log_warn_bad_exit_base_len
+    b .next_exit_base_env
 .next_exit_base_env:
     add x23, x23, #8
     b .find_exit_base
@@ -383,11 +430,15 @@ _start:
     bl prefix_match
     cbz x0, .next_max_restarts_env
     mov x1, x0
-    bl parse_u64_dec
+    bl parse_u64_dec_checked
+    cbz x1, .bad_max_restarts
     adrp x2, g_max_restarts
     add x2, x2, :lo12:g_max_restarts
     str x0, [x2]
     b .max_restarts_done
+.bad_max_restarts:
+    LOG log_warn_bad_max_restarts, log_warn_bad_max_restarts_len
+    b .next_max_restarts_env
 .next_max_restarts_env:
     add x23, x23, #8
     b .find_max_restarts
@@ -404,11 +455,23 @@ _start:
     bl prefix_match
     cbz x0, .next_restart_backoff_env
     mov x1, x0
-    bl parse_u64_dec
+    bl parse_u64_dec_checked
+    cbz x1, .bad_backoff
+    tbnz x0, #63, .clamp_backoff
     adrp x2, g_restart_backoff
     add x2, x2, :lo12:g_restart_backoff
     str x0, [x2]
     b .restart_backoff_done
+.clamp_backoff:
+    mov x0, #0x7fffffffffffffff
+    adrp x2, g_restart_backoff
+    add x2, x2, :lo12:g_restart_backoff
+    str x0, [x2]
+    LOG log_warn_clamp_backoff, log_warn_clamp_backoff_len
+    b .restart_backoff_done
+.bad_backoff:
+    LOG log_warn_bad_backoff, log_warn_bad_backoff_len
+    b .next_restart_backoff_env
 .next_restart_backoff_env:
     add x23, x23, #8
     b .find_restart_backoff
@@ -554,6 +617,11 @@ _start:
 
     bl read_signalfd_once
     mov x20, x0              // signo
+    mov x2, x20
+    adrp x0, log_signal_prefix
+    add x0, x0, :lo12:log_signal_prefix
+    mov x1, #log_signal_prefix_len
+    bl log_prefix_num
     cmp x20, #SIGCHLD
     beq .handle_chld
 
@@ -582,15 +650,11 @@ _start:
     mov x1, x20
     bl forward_signal_to_group
 
+    adrp x0, g_child_pid
+    add x0, x0, :lo12:g_child_pid
+    ldr x0, [x0]
     bl reap_children_nonblock
-    cmp x0, #0
-    ble .after_opportunistic
-
-    adrp x1, g_child_pid
-    add x1, x1, :lo12:g_child_pid
-    ldr x1, [x1]
-    cmp x0, x1
-    bne .after_opportunistic
+    cbz x0, .after_opportunistic
 
     bl get_wait_status_ptr
     ldr x0, [x0]
@@ -609,12 +673,33 @@ _start:
     SYSCALL SYS_exit
 
 .after_opportunistic:
+    // If the main child already exited (e.g., crash + pending restart backoff),
+    // treat any shutdown signal as "stop now" and do not restart.
+    adrp x0, g_child_exited
+    add x0, x0, :lo12:g_child_exited
+    ldr x0, [x0]
+    cmp x0, #1
+    bne .maybe_start_shutdown
+    adrp x0, g_child_status
+    add x0, x0, :lo12:g_child_status
+    ldr x0, [x0]
+    SYSCALL SYS_exit
+.maybe_start_shutdown:
     adrp x0, g_shutdown
     add x0, x0, :lo12:g_shutdown
     ldr x1, [x0]
     cmp x1, #1
     beq .main_loop
     LOG log_first_soft, log_first_soft_len
+    adrp x2, g_grace_secs
+    add x2, x2, :lo12:g_grace_secs
+    ldr x2, [x2]
+    adrp x0, log_grace_secs_prefix
+    add x0, x0, :lo12:log_grace_secs_prefix
+    mov x1, #log_grace_secs_prefix_len
+    mov x3, x2
+    mov x2, x3
+    bl log_prefix_num
     adrp x0, g_grace_secs
     add x0, x0, :lo12:g_grace_secs
     ldr x0, [x0]
@@ -652,6 +737,17 @@ _start:
     adrp x1, g_backoff_tfd
     add x1, x1, :lo12:g_backoff_tfd
     str xzr, [x1]
+    // If shutdown began while we were waiting for backoff, do not restart.
+    adrp x0, g_shutdown
+    add x0, x0, :lo12:g_shutdown
+    ldr x0, [x0]
+    cmp x0, #1
+    bne 1f
+    adrp x0, g_child_status
+    add x0, x0, :lo12:g_child_status
+    ldr x0, [x0]
+    SYSCALL SYS_exit
+1:
     // Reset state for restart
     adrp x0, g_child_exited
     add x0, x0, :lo12:g_child_exited
@@ -679,6 +775,11 @@ _start:
     ldr x1, [x0]
     add x1, x1, #1
     str x1, [x0]
+    mov x2, x1
+    adrp x0, log_restart_count_prefix
+    add x0, x0, :lo12:log_restart_count_prefix
+    mov x1, #log_restart_count_prefix_len
+    bl log_prefix_num
     LOG log_restart, log_restart_len
     b .main_loop
 .check_grace_timer:
@@ -699,6 +800,21 @@ _start:
     cmp x0, #1
     beq .main_loop
 
+    // avoid killing a reused PGID: if kill(-pgid, 0) reports ESRCH, skip escalation
+    adrp x0, g_child_pid
+    add x0, x0, :lo12:g_child_pid
+    ldr x0, [x0]
+    neg x0, x0
+    mov x1, #0
+    SYSCALL SYS_kill
+    cmp x0, #0
+    bge 1f
+    neg x2, x0
+    cmp x2, #ESRCH
+    bne 1f
+    LOG log_escalate_skip_dead_pgid, log_escalate_skip_dead_pgid_len
+    b .main_loop
+1:
     LOG log_escalate_kill, log_escalate_kill_len
     adrp x0, g_child_pid
     add x0, x0, :lo12:g_child_pid
@@ -712,14 +828,11 @@ _start:
     b .main_loop
 
 .handle_chld:
+    adrp x0, g_child_pid
+    add x0, x0, :lo12:g_child_pid
+    ldr x0, [x0]
     bl reap_children_nonblock
-    cmp x0, #0
-    beq .main_loop
-    adrp x1, g_child_pid
-    add x1, x1, :lo12:g_child_pid
-    ldr x1, [x1]
-    cmp x0, x1
-    bne .main_loop
+    cbz x0, .main_loop
 
     bl get_wait_status_ptr
     ldr x0, [x0]
@@ -764,7 +877,15 @@ _start:
     add x0, x0, :lo12:g_restart_backoff
     ldr x0, [x0]
     cbz x0, .restart_immediately
-    // Create backoff timerfd (x0 already has backoff seconds)
+    mov x3, x0
+    mov x2, x3
+    adrp x1, log_restart_backoff_prefix
+    add x1, x1, :lo12:log_restart_backoff_prefix
+    mov x0, x1
+    mov x1, #log_restart_backoff_prefix_len
+    bl log_prefix_num
+    // Create backoff timerfd
+    mov x0, x3
     bl create_grace_timerfd
     adrp x1, g_backoff_tfd
     add x1, x1, :lo12:g_backoff_tfd
@@ -807,6 +928,11 @@ _start:
     ldr x1, [x0]
     add x1, x1, #1
     str x1, [x0]
+    mov x2, x1
+    adrp x0, log_restart_count_prefix
+    add x0, x0, :lo12:log_restart_count_prefix
+    mov x1, #log_restart_count_prefix_len
+    bl log_prefix_num
     LOG log_restart, log_restart_len
     b .main_loop
 .max_restarts_reached:

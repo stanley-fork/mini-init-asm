@@ -24,9 +24,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y nasm make binutils
 
-      - name: Build amd64 binary
+      - name: Build and test amd64
         run: |
-          make build-amd64
+          make test-all
           strip build/mini-init-amd64
 
       - name: Upload amd64 artifact
@@ -47,12 +47,16 @@ jobs:
       - name: Install cross-compile dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm make binutils gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get install -y nasm make binutils gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-user-static file
 
       - name: Build arm64 binary
         run: |
           make build-arm64
           aarch64-linux-gnu-strip build/mini-init-arm64
+
+      - name: ARM64 fallback smoke (QEMU-user)
+        run: |
+          ARM64_FALLBACK=1 EP_ARM64_FALLBACK=1 bash scripts/test_harness_arm64.sh build/mini-init-arm64
 
       - name: Upload arm64 artifact
         uses: actions/upload-artifact@v4

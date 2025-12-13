@@ -29,7 +29,7 @@
     je %%done
     call get_timestamp_ptr
     mov rax, SYS_write
-    mov rdx, 19
+    mov rdx, 18
     mov rdi, 2
     mov rsi, rax
     syscall
@@ -85,4 +85,39 @@ parse_u64_dec:
     inc rsi
     jmp .loop
   .done:
+    ret
+
+; strict parse decimal u64 (digits only, non-empty, full-string)
+; in:  rsi = ptr to NUL-terminated string
+; out: rax = value (undefined if rdx=0), rdx = 1 if valid else 0
+parse_u64_dec_checked:
+    xor rax, rax
+    xor r11, r11              ; ok=0
+    mov r8b, [rsi]
+    test r8b, r8b
+    je .bad
+.loop_checked:
+    mov r8b, [rsi]
+    test r8b, r8b
+    je .ok
+    cmp r8b, '0'
+    jb .bad
+    cmp r8b, '9'
+    ja .bad
+    mov r11, 1
+    mov rcx, 10
+    mul rcx                   ; rdx:rax = rax*10
+    test rdx, rdx
+    jne .bad
+    movzx rcx, r8b
+    sub rcx, '0'
+    add rax, rcx
+    jc .bad
+    inc rsi
+    jmp .loop_checked
+.ok:
+    mov rdx, r11
+    ret
+.bad:
+    xor rdx, rdx
     ret

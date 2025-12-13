@@ -19,7 +19,7 @@ section .text
 
 ; rax = epoll_create1(0)
 epoll_create_fd:
-    xor rdi, rdi
+    mov rdi, EPOLL_CLOEXEC
     SYSCALL SYS_epoll_create1
     test rax, rax
     js .ret
@@ -39,6 +39,7 @@ epoll_add_fd:
     ; prepare struct epoll_event { uint32_t events; uint64_t data; } (we use 16 bytes)
     sub rsp, EPOLL_EVENT_SIZE
     mov dword [rsp], EPOLLIN       ; events
+    mov dword [rsp+4], 0           ; padding
     mov qword [rsp+8], rsi         ; data = fd
     mov rdx, rsi                   ; arg3: fd
     mov rsi, EPOLL_CTL_ADD         ; arg2: op

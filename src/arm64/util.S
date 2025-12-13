@@ -45,3 +45,38 @@ parse_u64_dec:
     b .p_loop
 .done:
     ret
+
+.global parse_u64_dec_checked
+.type parse_u64_dec_checked, %function
+// strict parse decimal u64 (digits only, non-empty, full-string)
+// in:  x1 = ptr to NUL-terminated string
+// out: x0 = value (undefined if x1=0), x1 = 1 if valid else 0
+parse_u64_dec_checked:
+    mov x0, #0
+    mov x2, #10
+    mov x5, #0              // ok=0
+    ldrb w3, [x1]
+    cbz w3, .bad
+.p_loop_checked:
+    ldrb w3, [x1]
+    cbz w3, .ok
+    cmp w3, #'0'
+    blt .bad
+    cmp w3, #'9'
+    bgt .bad
+    mov x5, #1
+    umulh x4, x0, x2
+    mul x0, x0, x2
+    cbnz x4, .bad
+    sub w3, w3, #'0'
+    uxtw x3, w3
+    adds x0, x0, x3
+    bcs .bad
+    add x1, x1, #1
+    b .p_loop_checked
+.ok:
+    mov x1, x5
+    ret
+.bad:
+    mov x1, #0
+    ret

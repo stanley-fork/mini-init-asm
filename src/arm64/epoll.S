@@ -16,7 +16,7 @@ epoll_events_buf:
 .extern get_timestamp_ptr
 
 epoll_create_fd:
-    mov x0, #0
+    mov x0, #EPOLL_CLOEXEC
     SYSCALL SYS_epoll_create1
     cmp x0, #0
     blt .ret
@@ -40,6 +40,8 @@ epoll_add_fd:
     sub sp, sp, #EPOLL_EVENT_SIZE
     mov w2, #EPOLLIN
     str w2, [sp]
+    mov w2, #0
+    str w2, [sp, #4]
     str x20, [sp, #8]
 
     mov x0, x19

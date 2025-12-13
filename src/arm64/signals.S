@@ -18,6 +18,7 @@ signalfd_fd:   .skip 8
 .extern get_timestamp_ptr
 .extern set_sig_bit
 .extern parse_u64_dec
+.extern parse_u64_dec_checked
 
 setup_signals_and_fd:
     stp x29, x30, [sp, #-16]!
@@ -108,7 +109,18 @@ setup_signals_and_fd:
     b .tok_scan
 .tok_done:
     mov x4, x1          // token end (delimiter or NUL)
-    sub x5, x4, x3      // length
+    // trim trailing spaces
+    mov x10, x4
+.trim_end:
+    cmp x10, x3
+    ble .trim_done
+    ldrb w11, [x10, #-1]
+    cmp w11, #' '
+    bne .trim_done
+    sub x10, x10, #1
+    b .trim_end
+.trim_done:
+    sub x5, x10, x3      // length
     cmp x5, #0
     ble .after_token
     cmp x5, #15
@@ -193,12 +205,13 @@ setup_signals_and_fd:
     cmp w0, #'T'
     bne .unknown_tok
     // Parse number after "RT"
-    add x0, x6, #2
-    bl parse_u64_dec
-    // Validate range: 1-31 (SIGRTMIN+1 to SIGRTMIN+31)
+    add x1, x6, #2
+    bl parse_u64_dec_checked
+    cbz x1, .unknown_tok
+    // Validate range: 1..(SIGRTMAX-SIGRTMIN) (SIGRTMIN+1..SIGRTMAX)
     cmp x0, #0
     beq .unknown_tok
-    cmp x0, #31
+    cmp x0, #(SIGRTMAX - SIGRTMIN)
     bgt .unknown_tok
     // Calculate SIGRTMIN + number
     add x1, x0, #SIGRTMIN

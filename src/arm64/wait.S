@@ -19,8 +19,11 @@ reap_children_nonblock:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
 
-    mov x19, #0
+    mov x21, x0         // main pid
+    mov x19, #0         // found pid
+    mov x22, #0         // saved main status
 .again:
     mov x0, #-1
     adrp x1, wait_status
@@ -31,14 +34,27 @@ reap_children_nonblock:
     cmp x0, #0
     bgt .got
     beq .done_reap
+    cmp x0, #-4         // -EINTR
+    beq .again
     b .done_reap
 
 .got:
+    cmp x0, x21
+    bne .again
     mov x19, x0
+    adrp x1, wait_status
+    add x1, x1, :lo12:wait_status
+    ldr x22, [x1]
     b .again
 
 .done_reap:
+    cbz x19, .out
+    adrp x1, wait_status
+    add x1, x1, :lo12:wait_status
+    str x22, [x1]
+.out:
     mov x0, x19
+    ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
