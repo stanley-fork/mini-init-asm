@@ -5,6 +5,7 @@
 - Real-time signals: `EP_SIGNALS=RT*` now requires explicit `EP_SIGRTMIN`/`EP_SIGRTMAX` (avoids hardcoded SIGRTMIN/SIGRTMAX assumptions).
 - `EP_SIGNALS` now supports numeric signal tokens (`1..64`, excluding SIGKILL/SIGSTOP).
 - Logging and fd I/O: add `write_all` handling partial writes and `EINTR`; harden `signalfd`/`timerfd` reads.
+- ARM64 correctness: fix AArch64 call/return ABI issues in helper paths (preserve `x30` where required) and ensure `do_spawn` is instruction-aligned (avoid native SIGILL).
 - Correctness: avoid forwarding signals after the main child has exited while restart backoff is pending (prevents accidental signaling of a reused PGID).
 - Debian readiness: add `mini-init-asm(1)` and an initial `debian/` packaging skeleton with autopkgtest and CI lintian build.
 

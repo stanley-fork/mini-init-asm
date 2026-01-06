@@ -70,14 +70,14 @@ $(AMD64_BUILD_DIR):
 $(ARM64_BUILD_DIR):
 	mkdir -p $@
 
-$(AMD64_BUILD_DIR)/%.o: $(AMD64_SRC_DIR)/%.asm | $(AMD64_BUILD_DIR)
+$(AMD64_BUILD_DIR)/%.o: $(AMD64_SRC_DIR)/%.asm $(INC_DIR)/*.inc | $(AMD64_BUILD_DIR)
 	$(NASM) $(NASMFLAGS) $< -o $@
 
-$(ARM64_BUILD_DIR)/%.o: $(ARM64_SRC_DIR)/%.S | $(ARM64_BUILD_DIR)
+$(ARM64_BUILD_DIR)/%.o: $(ARM64_SRC_DIR)/%.S $(INC_DIR)/*.inc | $(ARM64_BUILD_DIR)
 	$(ARM64_AS) $(ARM64_ASFLAGS) -I$(INC_DIR) $< -o $@
 
 # Helper objects
-$(ARM64_BUILD_DIR)/helpers/%.o: $(ARM64_SRC_DIR)/helpers/%.S | $(ARM64_BUILD_DIR)
+$(ARM64_BUILD_DIR)/helpers/%.o: $(ARM64_SRC_DIR)/helpers/%.S $(INC_DIR)/*.inc | $(ARM64_BUILD_DIR)
 	mkdir -p $(ARM64_BUILD_DIR)/helpers
 	$(ARM64_AS) $(ARM64_ASFLAGS) -I$(INC_DIR) $< -o $@
 

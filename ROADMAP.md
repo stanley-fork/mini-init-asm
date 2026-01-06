@@ -2,6 +2,10 @@
 
 This document tracks planned features and improvements for `mini-init-asm`.
 
+## Recently completed
+
+- See CHANGELOG.md
+
 ## Short-term (Next Release)
 
 ### Possible next steps
@@ -18,7 +22,7 @@ This document tracks planned features and improvements for `mini-init-asm`.
 - `EP_ARM64_FALLBACK=1` provides a wait4-only smoke test; `scripts/test_harness_arm64.sh` treats SIGILL/timeout as a non-fatal skip in fallback mode.
 - CI today:
   - always cross-builds arm64 and runs the QEMU-user fallback smoke;
-  - additionally runs native ARM64 tests on tagged releases / manual dispatch (runner availability varies).
+  - additionally runs native ARM64 tests on GitHub-hosted ARM runners (subject to runner availability).
 - Next: add a higher-confidence arm64 CI lane (preferred order):
   1) always-on native ARM64 runner, or
   2) full-system emulation integration tests (`qemu-system-aarch64`), or

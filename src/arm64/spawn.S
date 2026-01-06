@@ -1,10 +1,9 @@
 .include "syscalls_aarch64.inc"
 .include "macros_arm64.inc"
 
-.text
+.section .rodata
 .align 2
-.global do_spawn
-// extra debug strings (placed in text to keep single section assumptions)
+
 log_before_clone:
     .asciz "DEBUG: spawn before clone"
     .equ log_before_clone_len, . - log_before_clone - 1
@@ -14,6 +13,11 @@ log_after_clone_parent:
 log_after_clone_child:
     .asciz "DEBUG: spawn clone child"
     .equ log_after_clone_child_len, . - log_after_clone_child - 1
+
+.text
+.align 2
+.global do_spawn
+.type do_spawn, %function
 
 do_spawn:
     stp x29, x30, [sp, #-16]!
@@ -35,7 +39,7 @@ do_spawn:
     cmp x0, #0
     bgt .parent
     beq .child
-    b .out
+    b .out_restore
 
 .parent:
     LOG log_after_clone_parent, log_after_clone_parent_len

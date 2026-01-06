@@ -26,7 +26,7 @@
     adrp x3, g_verbose
     add x3, x3, :lo12:g_verbose
     ldr x3, [x3]
-    cbz x3, 1f
+    cbz x3, .Llog_done\@
     bl get_timestamp_ptr
     mov x1, x0
     mov x0, #2
@@ -46,7 +46,7 @@
     mov x2, #1
     bl write_all
     add sp, sp, #16
-1:
+.Llog_done\@:
     ldr x30, [sp], #16
     ldp x2, x3, [sp], #16
     ldp x0, x1, [sp], #16

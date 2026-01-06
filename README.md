@@ -137,7 +137,12 @@ make build-arm64
 And you can run the regular test scripts against the ARM64 binary:
 
 ```bash
-bash scripts/test_harness_arm64.sh build/mini-init-arm64
+bash scripts/test_harness.sh build/mini-init-arm64
+bash scripts/test_ep_signals.sh build/mini-init-arm64
+bash scripts/test_edge_cases.sh build/mini-init-arm64
+bash scripts/test_exit_code_mapping.sh build/mini-init-arm64
+bash scripts/test_restart.sh build/mini-init-arm64
+bash scripts/test_diagnostics.sh build/mini-init-arm64
 ```
 
 ### Example run (ARM64 via QEMU on x86 host)
@@ -156,9 +161,9 @@ If you see a usage message like `usage: mini-init-arm64 ...`, the `--` delimiter
 by QEMU. Use the extra `--` right after `qemu-aarch64-static`.
 
 > Note: QEMU user-mode emulation can be flaky for the full epoll/signalfd/timerfd loop on some hosts.
-> CI therefore uses `EP_ARM64_FALLBACK=1` for a minimal smoke test, and additionally runs native ARM64
-> tests for tagged releases when an ARM64 runner is available. For higher confidence, run tests on real
-> ARM64 hardware or use full-system emulation (qemu-system-aarch64) for integration tests.
+> CI therefore uses `EP_ARM64_FALLBACK=1` for a minimal smoke test, and also runs native ARM64 tests
+> on GitHub-hosted ARM runners (subject to runner availability). For higher confidence, run tests on
+> real ARM64 hardware or use full-system emulation (qemu-system-aarch64) for integration tests.
 
 ### Graceful stop demo
 
@@ -414,6 +419,20 @@ make test-arm64
 bash scripts/test_harness_arm64.sh build/mini-init-arm64
 ```
 
+### ARM64 (native)
+
+On an ARM64 host you can run the regular test scripts directly:
+
+```bash
+make build-arm64
+bash scripts/test_harness.sh build/mini-init-arm64
+bash scripts/test_ep_signals.sh build/mini-init-arm64
+bash scripts/test_edge_cases.sh build/mini-init-arm64
+bash scripts/test_exit_code_mapping.sh build/mini-init-arm64
+bash scripts/test_restart.sh build/mini-init-arm64
+bash scripts/test_diagnostics.sh build/mini-init-arm64
+```
+
 ### Test suites
 
 1. **Basic e2e tests** (`test_harness.sh`):
@@ -453,8 +472,8 @@ bash scripts/test_harness_arm64.sh build/mini-init-arm64
    - no restart after shutdown signal;
    - unlimited restarts (`EP_MAX_RESTARTS=0`).
 
-> **Note:** ARM64 tests run under QEMU user emulation and may differ slightly in timing.
-> The smoke tests verify basic behavior; for full determinism use native ARM64.
+> **Note:** ARM64 tests run under QEMU user emulation and may differ slightly in timing or fail on some
+> hosts; for full determinism use native ARM64.
 
 ---
 
