@@ -68,7 +68,7 @@ jobs:
 
   test-arm64-native:
     name: Test arm64 (native runner)
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-24.04-arm
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
