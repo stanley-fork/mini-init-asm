@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BIN="/usr/bin/mini-init-asm"
+
+echo "[autopkgtest] 0) version"
+"$BIN" --version >/dev/null
+
+echo "[autopkgtest] 1) graceful termination forwards TERM"
+EP_GRACE_SECONDS=2 "$BIN" -v -- /bin/sh -c 'trap "exit 0" TERM; sleep 1000' &
+pid=$!
+sleep 0.5
+kill -TERM "$pid"
+wait "$pid"
+
+echo "[autopkgtest] 2) escalation after grace"
+EP_GRACE_SECONDS=1 "$BIN" -v -- /bin/sh -c 'trap "" TERM INT HUP QUIT; while :; do sleep 5; done' &
+pid=$!
+sleep 0.5
+kill -TERM "$pid"
+set +e
+wait "$pid"
+rc=$?
+set -e
+test "$rc" -eq 137
+
+echo "[autopkgtest] 3) numeric EP_SIGNALS forwards SIGTRAP (5)"
+EP_SIGNALS=5 "$BIN" -v -- /bin/sh -c 'trap "exit 0" TRAP; sleep 1000' &
+pid=$!
+sleep 0.5
+kill -TRAP "$pid"
+wait "$pid"
+
+echo "[autopkgtest] OK"

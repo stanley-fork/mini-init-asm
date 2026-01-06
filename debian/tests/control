@@ -1,0 +1,3 @@
+Tests: smoke
+Depends: @, bash, coreutils
+Restrictions: superficial

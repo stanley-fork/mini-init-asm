@@ -68,28 +68,35 @@ EP_SIGNALS=THISISAVERYLONGTOKENTHATEXCEEDSTHEBUFFER "$BIN" -v -- /bin/sh -c 'exi
 }
 
 # Test 9: Real-time signals (RT1, RT2, etc.)
-echo "[test] 9) Real-time signals: RT1,RT2,RT5"
-EP_SIGNALS=RT1,RT2,RT5 "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "EP_SIGNALS parsed" || {
-    echo "FAIL: RT signals not parsed"
+echo "[test] 9) RT tokens require explicit EP_SIGRTMIN/EP_SIGRTMAX (warns if missing)"
+EP_SIGNALS=RT1 "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "RT\\* EP_SIGNALS tokens require EP_SIGRTMIN" || {
+    echo "FAIL: Expected warning for RT token without EP_SIGRTMIN/EP_SIGRTMAX"
+    exit 1
+}
+
+echo "[test] 9b) Real-time signals with explicit RT bounds: RT1,RT2,RT5"
+EP_SIGRTMIN=34 EP_SIGRTMAX=64 EP_SIGNALS=RT1,RT2,RT5 \
+  "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "EP_SIGNALS parsed" || {
+    echo "FAIL: RT signals not parsed with EP_SIGRTMIN/EP_SIGRTMAX"
     exit 1
 }
 
 # Test 10: Invalid RT signal (RT0, RT31, RT32)
 echo "[test] 10) Invalid RT signals: RT0,RT31,RT32 (should warn)"
-EP_SIGNALS=RT0,RT31,RT32 "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "Unknown EP_SIGNALS token" || {
+EP_SIGRTMIN=34 EP_SIGRTMAX=64 EP_SIGNALS=RT0,RT31,RT32 "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "Unknown EP_SIGNALS token" || {
     echo "FAIL: Invalid RT signals not handled"
     exit 1
 }
 
 # Test 11: Mixed RT and regular signals
 echo "[test] 11) Mixed signals: USR1,RT1,RT5,USR2"
-EP_SIGNALS=USR1,RT1,RT5,USR2 "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "EP_SIGNALS parsed" || {
+EP_SIGRTMIN=34 EP_SIGRTMAX=64 EP_SIGNALS=USR1,RT1,RT5,USR2 "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "EP_SIGNALS parsed" || {
     echo "FAIL: Mixed RT and regular signals not parsed"
     exit 1
 }
 
 echo "[test] 11b) Invalid RT suffix: RT5X (should warn)"
-EP_SIGNALS=RT5X "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "Unknown EP_SIGNALS token" || {
+EP_SIGRTMIN=34 EP_SIGRTMAX=64 EP_SIGNALS=RT5X "$BIN" -v -- /bin/sh -c 'exit 0' 2>&1 | grep -q "Unknown EP_SIGNALS token" || {
     echo "FAIL: Invalid RT suffix not warned"
     exit 1
 }

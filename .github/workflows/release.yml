@@ -66,9 +66,61 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  test-arm64-native:
+    name: Test arm64 (native runner)
+    runs-on: ubuntu-24.04-arm64
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make binutils
+
+      - name: Build and test arm64
+        run: |
+          make DEBUG=0 build-arm64
+          bash scripts/test_harness_arm64.sh build/mini-init-arm64
+
+  debian-package:
+    name: Debian package build (lintian)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Debian packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils debhelper devscripts dpkg-dev fakeroot lintian make nasm
+
+      - name: Build Debian package
+        run: |
+          dpkg-buildpackage -us -uc -b
+
+      - name: Lintian (fail on warnings)
+        run: |
+          lintian --fail-on warning --display-info --tag-display-limit 0 ../*.deb
+
+      - name: Upload Debian artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-packaging-${{ github.sha }}
+          path: |
+            ../*.deb
+            ../*.buildinfo
+            ../*.changes
+            ../*.dsc
+            ../*.tar.*
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: Release
-    needs: [build-amd64, build-arm64]
+    needs: [build-amd64, build-arm64, test-arm64-native, debian-package]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:

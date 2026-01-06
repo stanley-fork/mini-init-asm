@@ -31,7 +31,7 @@
 .align 3
 usage_msg:         .asciz "usage: mini-init-arm64 [--verbose|-v] [--version|-V] -- <cmd> [args...]"
 .equ usage_msg_len, . - usage_msg - 1
-version_msg:       .asciz "mini-init-arm64 0.2.0"
+version_msg:       .asciz "mini-init-arm64 0.3.0"
 log_first_soft:    .asciz "DEBUG: first soft signal received"
 .equ log_first_soft_len, . - log_first_soft - 1
 log_escalate_kill: .asciz "DEBUG: escalating to SIGKILL"
@@ -66,8 +66,16 @@ log_warn_bad_max_restarts: .asciz "WARN: invalid EP_MAX_RESTARTS; using default"
 .equ log_warn_bad_max_restarts_len, . - log_warn_bad_max_restarts - 1
 log_warn_bad_backoff: .asciz "WARN: invalid EP_RESTART_BACKOFF_SECONDS; using default"
 .equ log_warn_bad_backoff_len, . - log_warn_bad_backoff - 1
-log_warn_clamp_backoff: .asciz "WARN: EP_RESTART_BACKOFF_SECONDS too large; clamping"
-.equ log_warn_clamp_backoff_len, . - log_warn_clamp_backoff - 1
+	log_warn_clamp_backoff: .asciz "WARN: EP_RESTART_BACKOFF_SECONDS too large; clamping"
+	.equ log_warn_clamp_backoff_len, . - log_warn_clamp_backoff - 1
+	log_warn_grace_timer_unavailable: .asciz "WARN: grace timer unavailable; escalating immediately to SIGKILL"
+	.equ log_warn_grace_timer_unavailable_len, . - log_warn_grace_timer_unavailable - 1
+	log_warn_backoff_timer_epoll_failed: .asciz "WARN: backoff timer could not be added to epoll; restarting immediately"
+	.equ log_warn_backoff_timer_epoll_failed_len, . - log_warn_backoff_timer_epoll_failed - 1
+	log_info_child_exited_ignore_signal: .asciz "DEBUG: child already exited; ignoring non-shutdown signal during restart backoff"
+	.equ log_info_child_exited_ignore_signal_len, . - log_info_child_exited_ignore_signal - 1
+	log_info_child_exited_cancel_restart: .asciz "DEBUG: shutdown requested during restart backoff; exiting without restart"
+	.equ log_info_child_exited_cancel_restart_len, . - log_info_child_exited_cancel_restart - 1
 log_after_sfd:     .asciz "DEBUG: after setup_signals_and_fd"
 .equ log_after_sfd_len, . - log_after_sfd - 1
 log_fallback:      .asciz "DEBUG: using ARM64 fallback (wait4-only)"
@@ -599,7 +607,7 @@ _start:
     mov x1, #log_child_pid_len
     bl log_prefix_num
 
-.main_loop:
+	.main_loop:
     adrp x0, g_epfd
     add x0, x0, :lo12:g_epfd
     ldr x0, [x0]
@@ -615,15 +623,48 @@ _start:
     cmp x19, x0
     bne .check_timer
 
-    bl read_signalfd_once
-    mov x20, x0              // signo
+	    bl read_signalfd_once
+	    // On signalfd read errors (EAGAIN/EINTR), ignore and continue.
+	    tbnz x0, #63, .main_loop
+	    mov x20, x0              // signo
     mov x2, x20
     adrp x0, log_signal_prefix
     add x0, x0, :lo12:log_signal_prefix
     mov x1, #log_signal_prefix_len
     bl log_prefix_num
-    cmp x20, #SIGCHLD
-    beq .handle_chld
+	    cmp x20, #SIGCHLD
+	    beq .handle_chld
+
+	    // If child already exited (e.g. crash + pending restart backoff), avoid
+	    // forwarding signals to a potentially reused PGID.
+	    adrp x0, g_child_exited
+	    add x0, x0, :lo12:g_child_exited
+	    ldr x0, [x0]
+	    cmp x0, #1
+	    bne 1f
+	    adrp x1, g_backoff_tfd
+	    add x1, x1, :lo12:g_backoff_tfd
+	    ldr x1, [x1]
+	    cbz x1, 2f
+	    // Backoff is active: only shutdown signals cancel the restart; other signals are ignored.
+	    cmp x20, #SIGTERM
+	    beq 3f
+	    cmp x20, #SIGINT
+	    beq 3f
+	    cmp x20, #SIGHUP
+	    beq 3f
+	    cmp x20, #SIGQUIT
+	    beq 3f
+	    LOG log_info_child_exited_ignore_signal, log_info_child_exited_ignore_signal_len
+	    b .main_loop
+3:
+	    LOG log_info_child_exited_cancel_restart, log_info_child_exited_cancel_restart_len
+2:
+	    adrp x0, g_child_status
+	    add x0, x0, :lo12:g_child_status
+	    ldr x0, [x0]
+	    SYSCALL SYS_exit
+1:
 
     // soft signals
     cmp x20, #SIGTERM
@@ -684,7 +725,7 @@ _start:
     add x0, x0, :lo12:g_child_status
     ldr x0, [x0]
     SYSCALL SYS_exit
-.maybe_start_shutdown:
+	.maybe_start_shutdown:
     adrp x0, g_shutdown
     add x0, x0, :lo12:g_shutdown
     ldr x1, [x0]
@@ -703,20 +744,52 @@ _start:
     adrp x0, g_grace_secs
     add x0, x0, :lo12:g_grace_secs
     ldr x0, [x0]
-    bl create_grace_timerfd
-    adrp x1, g_tfd
-    add x1, x1, :lo12:g_tfd
-    str x0, [x1]
+	    bl create_grace_timerfd
+	    // If timerfd creation failed, escalate immediately.
+	    tbnz x0, #63, .grace_timer_unavailable
+	    adrp x1, g_tfd
+	    add x1, x1, :lo12:g_tfd
+	    str x0, [x1]
     adrp x2, g_epfd
     add x2, x2, :lo12:g_epfd
-    ldr x0, [x2]
-    ldr x1, [x1]
-    bl epoll_add_fd
-    mov x1, #1
-    adrp x0, g_shutdown
-    add x0, x0, :lo12:g_shutdown
-    str x1, [x0]
-    b .main_loop
+	    ldr x0, [x2]
+	    ldr x1, [x1]
+	    bl epoll_add_fd
+	    cmp x0, #0
+	    bge 1f
+	    // epoll add failed -> close timerfd and escalate immediately
+	    adrp x0, g_tfd
+	    add x0, x0, :lo12:g_tfd
+	    ldr x0, [x0]
+	    SYSCALL SYS_close
+	    adrp x1, g_tfd
+	    add x1, x1, :lo12:g_tfd
+	    str xzr, [x1]
+	    b .grace_timer_unavailable
+1:
+	    mov x1, #1
+	    adrp x0, g_shutdown
+	    add x0, x0, :lo12:g_shutdown
+	    str x1, [x0]
+	    b .main_loop
+
+.grace_timer_unavailable:
+	    LOG log_warn_grace_timer_unavailable, log_warn_grace_timer_unavailable_len
+	    mov x1, #1
+	    adrp x0, g_shutdown
+	    add x0, x0, :lo12:g_shutdown
+	    str x1, [x0]
+	    // escalate immediately to SIGKILL
+	    adrp x0, g_child_pid
+	    add x0, x0, :lo12:g_child_pid
+	    ldr x0, [x0]
+	    mov x1, #SIGKILL
+	    bl forward_signal_to_group
+	    mov x1, #1
+	    adrp x0, g_killed
+	    add x0, x0, :lo12:g_killed
+	    str x1, [x0]
+	    b .main_loop
 
 .check_timer:
     // Check if this is the backoff timer
@@ -871,7 +944,7 @@ _start:
     ldr x1, [x1]
     cmp x1, x0
     bge .max_restarts_reached
-.check_restart_backoff:
+	.check_restart_backoff:
     // Check if we need backoff
     adrp x0, g_restart_backoff
     add x0, x0, :lo12:g_restart_backoff
@@ -892,14 +965,27 @@ _start:
     str x0, [x1]
     // Check if timerfd creation failed
     tbnz x0, #63, .restart_immediately  // Negative means error
-    // Add backoff timerfd to epoll
-    adrp x2, g_epfd
-    add x2, x2, :lo12:g_epfd
-    ldr x0, [x2]
-    ldr x1, [x1]
-    bl epoll_add_fd
-    LOG log_backoff_wait, log_backoff_wait_len
-    b .main_loop
+	    // Add backoff timerfd to epoll
+	    adrp x2, g_epfd
+	    add x2, x2, :lo12:g_epfd
+	    ldr x0, [x2]
+	    ldr x1, [x1]
+	    bl epoll_add_fd
+	    cmp x0, #0
+	    bge 1f
+	    LOG log_warn_backoff_timer_epoll_failed, log_warn_backoff_timer_epoll_failed_len
+	    // close backoff timerfd and restart immediately
+	    adrp x0, g_backoff_tfd
+	    add x0, x0, :lo12:g_backoff_tfd
+	    ldr x0, [x0]
+	    SYSCALL SYS_close
+	    adrp x1, g_backoff_tfd
+	    add x1, x1, :lo12:g_backoff_tfd
+	    str xzr, [x1]
+	    b .restart_immediately
+1:
+	    LOG log_backoff_wait, log_backoff_wait_len
+	    b .main_loop
 .restart_immediately:
     // Reset state for restart
     adrp x0, g_child_exited

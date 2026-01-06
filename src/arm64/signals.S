@@ -7,6 +7,9 @@ sigset:        .skip 128
 signalfd_buf:  .skip 128
 token_buf:     .skip 16
 signalfd_fd:   .skip 8
+rtmin_val:     .skip 8
+rtmax_val:     .skip 8
+rt_enabled:    .skip 8
 
 .text
 .align 2
@@ -81,6 +84,79 @@ setup_signals_and_fd:
     mov x0, x20
     mov x1, #SIGALRM
     bl set_sig_bit
+
+    // Parse optional EP_SIGRTMIN/EP_SIGRTMAX (required for RT* tokens)
+    adrp x0, rt_enabled
+    add x0, x0, :lo12:rt_enabled
+    str xzr, [x0]
+    adrp x0, rtmin_val
+    add x0, x0, :lo12:rtmin_val
+    str xzr, [x0]
+    adrp x0, rtmax_val
+    add x0, x0, :lo12:rtmax_val
+    str xzr, [x0]
+
+    mov x26, #0               // found rtmin
+    mov x27, #0               // found rtmax
+    mov x22, x19
+.find_sigrt_env:
+    ldr x23, [x22]
+    cbz x23, .after_sigrt_env
+    adrp x0, ep_sigrtmin_pref
+    add x0, x0, :lo12:ep_sigrtmin_pref
+    mov x1, x23
+    bl prefix_match
+    cbz x0, .chk_sigrtmax
+    mov x1, x0
+    bl parse_u64_dec_checked
+    cbz x1, .next_sigrt_env
+    adrp x2, rtmin_val
+    add x2, x2, :lo12:rtmin_val
+    str x0, [x2]
+    mov x26, #1
+    b .next_sigrt_env
+.chk_sigrtmax:
+    adrp x0, ep_sigrtmax_pref
+    add x0, x0, :lo12:ep_sigrtmax_pref
+    mov x1, x23
+    bl prefix_match
+    cbz x0, .next_sigrt_env
+    mov x1, x0
+    bl parse_u64_dec_checked
+    cbz x1, .next_sigrt_env
+    adrp x2, rtmax_val
+    add x2, x2, :lo12:rtmax_val
+    str x0, [x2]
+    mov x27, #1
+.next_sigrt_env:
+    add x22, x22, #8
+    b .find_sigrt_env
+.after_sigrt_env:
+    cmp x26, #1
+    bne .sigrt_done
+    cmp x27, #1
+    bne .sigrt_done
+    adrp x0, rtmin_val
+    add x0, x0, :lo12:rtmin_val
+    ldr x0, [x0]
+    cmp x0, #1
+    blt .sigrt_done
+    cmp x0, #KERNEL_SIGMAX
+    bgt .sigrt_done
+    adrp x1, rtmax_val
+    add x1, x1, :lo12:rtmax_val
+    ldr x1, [x1]
+    cmp x1, #1
+    blt .sigrt_done
+    cmp x1, #KERNEL_SIGMAX
+    bgt .sigrt_done
+    cmp x0, x1
+    bge .sigrt_done
+    adrp x2, rt_enabled
+    add x2, x2, :lo12:rt_enabled
+    mov x3, #1
+    str x3, [x2]
+.sigrt_done:
 
     // Parse EP_SIGNALS (CSV)
     mov x22, x19
@@ -197,6 +273,29 @@ setup_signals_and_fd:
     cmp x0, #1
     beq .set_alrm
 
+    // Numeric signal token (decimal)
+    ldrb w0, [x6]
+    cmp w0, #'0'
+    blt 1f
+    cmp w0, #'9'
+    bgt 1f
+    mov x1, x6
+    bl parse_u64_dec_checked
+    cbz x1, .unknown_tok
+    cmp x0, #1
+    blt .unknown_tok
+    cmp x0, #KERNEL_SIGMAX
+    bgt .unknown_tok
+    cmp x0, #SIGKILL
+    beq .unknown_tok
+    cmp x0, #SIGSTOP
+    beq .unknown_tok
+    mov x1, x0
+    mov x0, x20
+    bl set_sig_bit
+    b .after_token
+
+1:
     // Check if token starts with "RT" (real-time signal)
     ldrb w0, [x6]
     cmp w0, #'R'
@@ -204,19 +303,38 @@ setup_signals_and_fd:
     ldrb w0, [x6, #1]
     cmp w0, #'T'
     bne .unknown_tok
+    // Require explicit runtime SIGRTMIN/SIGRTMAX
+    adrp x2, rt_enabled
+    add x2, x2, :lo12:rt_enabled
+    ldr x2, [x2]
+    cbz x2, .rt_disabled
     // Parse number after "RT"
     add x1, x6, #2
     bl parse_u64_dec_checked
     cbz x1, .unknown_tok
-    // Validate range: 1..(SIGRTMAX-SIGRTMIN) (SIGRTMIN+1..SIGRTMAX)
+    // Validate range: 1..(rtmax-rtmin) (rtmin+1..rtmax)
     cmp x0, #0
     beq .unknown_tok
-    cmp x0, #(SIGRTMAX - SIGRTMIN)
+    adrp x2, rtmax_val
+    add x2, x2, :lo12:rtmax_val
+    ldr x2, [x2]
+    adrp x3, rtmin_val
+    add x3, x3, :lo12:rtmin_val
+    ldr x3, [x3]
+    sub x2, x2, x3
+    cmp x0, x2
     bgt .unknown_tok
-    // Calculate SIGRTMIN + number
-    add x1, x0, #SIGRTMIN
+    // Calculate rtmin + number
+    adrp x2, rtmin_val
+    add x2, x2, :lo12:rtmin_val
+    ldr x2, [x2]
+    add x1, x0, x2
     mov x0, x20
     bl set_sig_bit
+    b .after_token
+
+.rt_disabled:
+    LOG log_rt_needs_env, log_rt_needs_env_len
     b .after_token
 
 .unknown_tok:
@@ -330,14 +448,22 @@ read_signalfd_once:
     adrp x1, signalfd_buf
     add x1, x1, :lo12:signalfd_buf
     mov x2, #128
+1:
     SYSCALL SYS_read
+    cmp x0, #128
+    beq 2f
     cmp x0, #0
     blt .read_err
+    b .read_err
+2:
     adrp x1, signalfd_buf
     add x1, x1, :lo12:signalfd_buf
     ldr w0, [x1]
     ret
 .read_err:
+    cmp x0, #-EINTR
+    beq 1b
+    mov x0, #-1
     ret
 
 get_signalfd_fd:
@@ -398,10 +524,14 @@ log_sfd_err:        .asciz "ERROR: signalfd4 failed"
 .equ log_sfd_err_len, . - log_sfd_err - 1
 log_unknown_token:  .asciz "WARN: Unknown EP_SIGNALS token ignored"
 .equ log_unknown_token_len, . - log_unknown_token - 1
+log_rt_needs_env:  .asciz "WARN: RT* EP_SIGNALS tokens require EP_SIGRTMIN and EP_SIGRTMAX; ignoring RT token"
+.equ log_rt_needs_env_len, . - log_rt_needs_env - 1
 log_epsig_done:     .asciz "DEBUG: EP_SIGNALS parsed"
 .equ log_epsig_done_len, . - log_epsig_done - 1
 
 ep_sigpref: .asciz "EP_SIGNALS="
+ep_sigrtmin_pref: .asciz "EP_SIGRTMIN="
+ep_sigrtmax_pref: .asciz "EP_SIGRTMAX="
 tok_USR1:   .asciz "USR1"
 tok_USR2:   .asciz "USR2"
 tok_PIPE:   .asciz "PIPE"

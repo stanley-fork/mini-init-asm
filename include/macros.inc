@@ -1,5 +1,7 @@
 ; Common macros & helpers for Linux x86-64 syscalls (NASM)
 
+extern write_all
+
 %macro SYSCALL 1
     mov rax, %1
     syscall
@@ -28,16 +30,14 @@
     cmp qword [rel g_verbose], 0
     je %%done
     call get_timestamp_ptr
-    mov rax, SYS_write
-    mov rdx, 18
     mov rdi, 2
     mov rsi, rax
-    syscall
-    mov rax, SYS_write
+    mov rdx, 18
+    call write_all
     mov rdi, 2
     mov rsi, %1
     mov rdx, %2
-    syscall
+    call write_all
 %%done:
     pop rdx
     pop rsi

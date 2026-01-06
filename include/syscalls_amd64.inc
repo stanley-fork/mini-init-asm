@@ -53,12 +53,13 @@
 %define SIGTTIN 21
 %define SIGTTOU 22
 %define SIGWINCH 28
-%define SIGRTMIN 34
-%define SIGRTMAX 64
+; NOTE: do not hardcode SIGRTMIN/SIGRTMAX (see signal(7)); they vary at runtime in libc.
+%define KERNEL_SIGMAX 64
 
 ; errno subset
 %define ESRCH         3
 %define EINTR         4
+%define EAGAIN       11
 
 ; timerfd/signalfd flags (octal per manpages)
 %define TFD_CLOEXEC   02000000o

@@ -19,6 +19,9 @@ sigset:         resb 128           ; kernel_sigset_t (x86-64: 64 signals)
 signalfd_buf:   resb 128           ; struct signalfd_siginfo
 token_buf:      resb 16            ; temp buffer for EP_SIGNALS tokens
 signalfd_fd:    resq 1
+rtmin_val:      resq 1
+rtmax_val:      resq 1
+rt_enabled:     resq 1
 
 section .text
 
@@ -66,6 +69,64 @@ setup_signals_and_fd:
     call set_sig_bit
     mov rsi, SIGALRM
     call set_sig_bit
+
+    ; Parse optional EP_SIGRTMIN/EP_SIGRTMAX (required for RT* tokens)
+    mov qword [rel rt_enabled], 0
+    mov qword [rel rtmin_val], 0
+    mov qword [rel rtmax_val], 0
+    xor r13, r13                  ; found rtmin
+    xor r15, r15                  ; found rtmax
+    mov rbx, r12
+  .find_sigrt_env:
+    mov rax, [rbx]
+    test rax, rax
+    je  .after_sigrt_env
+    lea rdi, [rel ep_sigrtmin_pref]
+    mov rsi, rax
+    call prefix_match
+    test rax, rax
+    jz  .chk_sigrtmax
+    mov rsi, rax
+    call parse_u64_dec_checked
+    test rdx, rdx
+    jz  .next_sigrt_env
+    mov [rel rtmin_val], rax
+    mov r13, 1
+    jmp .next_sigrt_env
+  .chk_sigrtmax:
+    lea rdi, [rel ep_sigrtmax_pref]
+    mov rsi, [rbx]
+    call prefix_match
+    test rax, rax
+    jz  .next_sigrt_env
+    mov rsi, rax
+    call parse_u64_dec_checked
+    test rdx, rdx
+    jz  .next_sigrt_env
+    mov [rel rtmax_val], rax
+    mov r15, 1
+  .next_sigrt_env:
+    add rbx, 8
+    jmp .find_sigrt_env
+  .after_sigrt_env:
+    cmp r13, 1
+    jne .sigrt_done
+    cmp r15, 1
+    jne .sigrt_done
+    mov rax, [rel rtmin_val]
+    cmp rax, 1
+    jb .sigrt_done
+    cmp rax, KERNEL_SIGMAX
+    ja .sigrt_done
+    mov rbx, [rel rtmax_val]
+    cmp rbx, 1
+    jb .sigrt_done
+    cmp rbx, KERNEL_SIGMAX
+    ja .sigrt_done
+    cmp rax, rbx
+    jae .sigrt_done
+    mov qword [rel rt_enabled], 1
+  .sigrt_done:
 
     ; Parse EP_SIGNALS=CSV (optional)
     mov rbx, r12
@@ -199,8 +260,32 @@ setup_signals_and_fd:
     call token_eq
     mov rsi, r9
     cmp rax, 1
-    jne .chk_rt
+    jne .chk_numeric
     mov rsi, SIGALRM
+    lea rdi, [rel sigset]
+    call set_sig_bit
+    jmp .after_token
+  .chk_numeric:
+    ; Numeric signal token (decimal)
+    lea rbx, [rel token_buf]
+    mov al, [rbx]
+    cmp al, '0'
+    jb  .chk_rt
+    cmp al, '9'
+    ja  .chk_rt
+    lea rsi, [rbx]
+    call parse_u64_dec_checked
+    test rdx, rdx
+    jz .unknown_tok
+    cmp rax, 1
+    jb .unknown_tok
+    cmp rax, KERNEL_SIGMAX
+    ja .unknown_tok
+    cmp rax, SIGKILL
+    je .unknown_tok
+    cmp rax, SIGSTOP
+    je .unknown_tok
+    mov rsi, rax
     lea rdi, [rel sigset]
     call set_sig_bit
     jmp .after_token
@@ -213,21 +298,29 @@ setup_signals_and_fd:
     mov al, [rbx+1]
     cmp al, 'T'
     jne .unknown_tok
+    ; Require explicit runtime SIGRTMIN/SIGRTMAX
+    cmp qword [rel rt_enabled], 1
+    jne .rt_disabled
     ; Parse number after "RT"
     lea rsi, [rbx+2]
     call parse_u64_dec_checked
     test rdx, rdx
     jz .unknown_tok
-    ; Validate range: 1..(SIGRTMAX-SIGRTMIN) (SIGRTMIN+1..SIGRTMAX)
+    ; Validate range: 1..(rtmax-rtmin) (rtmin+1..rtmax)
     cmp rax, 0
     je .unknown_tok
-    cmp rax, (SIGRTMAX - SIGRTMIN)
+    mov rcx, [rel rtmax_val]
+    sub rcx, [rel rtmin_val]
+    cmp rax, rcx
     ja .unknown_tok
-    ; Calculate SIGRTMIN + number
-    add rax, SIGRTMIN
+    ; Calculate rtmin + number
+    add rax, [rel rtmin_val]
     mov rsi, rax
     lea rdi, [rel sigset]
     call set_sig_bit
+    jmp .after_token
+  .rt_disabled:
+    LOG log_rt_needs_env, log_rt_needs_env_len
     jmp .after_token
   .unknown_tok:
     LOG log_unknown_token, log_unknown_token_len
@@ -347,14 +440,26 @@ read_signalfd_once:
     mov rdi, [rel signalfd_fd]
     lea rsi, [rel signalfd_buf]
     mov rdx, 128
+  .read_retry:
     SYSCALL SYS_read
+    cmp rax, 128
+    je .ok
     test rax, rax
-    js .err
+    js .read_err
+    jmp .err
+  .read_err:
+    cmp rax, -EINTR
+    je .read_retry
+    cmp rax, -EAGAIN
+    je .err
+    jmp .err
+  .ok:
     ; struct signalfd_siginfo starts with uint32_t ssi_signo
     mov eax, dword [rel signalfd_buf]
     movsx rax, eax
     ret
 .err:
+    mov rax, -1
     ret
 
 ; From wait.asm
@@ -395,6 +500,8 @@ token_eq_range:
     pop rbx
     ret
 ep_sigpref: db "EP_SIGNALS=",0
+ep_sigrtmin_pref: db "EP_SIGRTMIN=",0
+ep_sigrtmax_pref: db "EP_SIGRTMAX=",0
 tok_USR1:   db "USR1",0
 tok_USR2:   db "USR2",0
 tok_PIPE:   db "PIPE",0
@@ -417,3 +524,5 @@ log_tok_check: db "DEBUG: EP_SIGNALS token check", 10
 log_tok_check_len: equ $ - log_tok_check
 log_sfd_create_err: db "ERROR: signalfd4 failed", 10
 log_sfd_create_err_len: equ $ - log_sfd_create_err
+log_rt_needs_env: db "WARN: RT* EP_SIGNALS tokens require EP_SIGRTMIN and EP_SIGRTMAX; ignoring RT token", 10
+log_rt_needs_env_len: equ $ - log_rt_needs_env

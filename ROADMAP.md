@@ -6,7 +6,7 @@ This document tracks planned features and improvements for `mini-init-asm`.
 
 ### Possible next steps
 
-- Native ARM64 validation (real hardware or full-system QEMU) for the normal epoll/signalfd path.
+- Native ARM64 validation (real hardware or full-system QEMU) for the normal epoll/signalfd path in CI (not only fallback smoke).
 - Consider optional `EP_SUBREAPER_WAIT=1` (wait for adopted children after main child exit) and document tradeoffs.
 - Consider `EP_RESTART_ON_NONZERO_EXIT=1` (opt-in) if restart-on-crash should include nonzero normal exits.
 - Clamp `EP_MAX_RESTARTS` to a sane upper bound to avoid pathological loops.
@@ -14,13 +14,15 @@ This document tracks planned features and improvements for `mini-init-asm`.
 
 ### Arm64 tests on linux
 
-- QEMU user-mode remains flaky: ARM64 binary hangs/SIGILLs under `qemu-aarch64-static` right after startup (historically even with fallback mode).
-- Helpers (`helper-exit42`, `helper-sleeper`) run fine under QEMU; issue is specific to `mini-init-arm64` user-mode emulation.
-- Instrumentation shows execution reaches `get_timestamp_ptr`/epoll setup, then no further syscalls; QEMU SIGILL is likely emulator-specific.
-- Added `EP_ARM64_FALLBACK`/`ARM64_FALLBACK` env to skip the QEMU smoke in CI while keeping native behavior unchanged.
-- Implemented a safer path: removed `msub` usage and made `EP_ARM64_FALLBACK=1` omit timestamp formatting to avoid QEMU-user issues.
-- Note: even in fallback mode (`EP_ARM64_FALLBACK=1`), QEMU-user may still SIGILL on some runners; CI treats SIGILL/timeout as a non-fatal skip while still running helper binaries and `--version`.
-- Next: validate on native ARM64 hardware or full-system QEMU; try newer QEMU user-mode if emulation still fails.
+- QEMU user-mode remains flaky for the full init loop on some hosts (hang/SIGILL under `qemu-aarch64-static`).
+- `EP_ARM64_FALLBACK=1` provides a wait4-only smoke test; `scripts/test_harness_arm64.sh` treats SIGILL/timeout as a non-fatal skip in fallback mode.
+- CI today:
+  - always cross-builds arm64 and runs the QEMU-user fallback smoke;
+  - additionally runs native ARM64 tests on tagged releases / manual dispatch (runner availability varies).
+- Next: add a higher-confidence arm64 CI lane (preferred order):
+  1) always-on native ARM64 runner, or
+  2) full-system emulation integration tests (`qemu-system-aarch64`), or
+  3) pin/upgrade QEMU-user and expand fallback coverage if full-loop remains unstable.
 
 ---
 

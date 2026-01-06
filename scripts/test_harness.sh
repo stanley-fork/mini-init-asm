@@ -40,3 +40,15 @@ wait_rc=$?
 set -e
 echo "[test] rc=$wait_rc"
 test "$wait_rc" -eq 0
+
+echo "[test] 4) Forward numeric EP_SIGNALS=5 (SIGTRAP)"
+EP_SIGNALS=5 "$BIN" -v -- /bin/sh -c 'trap "echo got TRAP; exit 0" TRAP; sleep 99' &
+pid=$!
+sleep 1
+kill -TRAP "$pid"
+set +e
+wait "$pid"
+wait_rc=$?
+set -e
+echo "[test] rc=$wait_rc"
+test "$wait_rc" -eq 0

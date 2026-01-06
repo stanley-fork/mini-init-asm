@@ -78,9 +78,26 @@ read_timerfd_tick:
     sub rsp, 8
     mov rsi, rsp
     mov rdx, 8
+  .read_retry:
     SYSCALL SYS_read
-    add rsp, 8
+    cmp rax, 8
+    je .ok
+    test rax, rax
+    jns .short_or_eof
+    cmp rax, -EINTR
+    je .read_retry
+    cmp rax, -EAGAIN
+    je .ok               ; already drained
+    ; other error -> propagate
+    jmp .out
+  .short_or_eof:
+    ; unexpected short read; treat as error
+    mov rax, -1
+    jmp .out
+  .ok:
     xor rax, rax
+  .out:
+    add rsp, 8
     ret
 
 section .rodata

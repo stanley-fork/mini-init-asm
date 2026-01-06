@@ -52,15 +52,16 @@
 .equ SIGCONT, 18
 .equ SIGSTOP, 19
 .equ SIGTSTP, 20
-.equ SIGTTIN, 21
-.equ SIGTTOU, 22
-.equ SIGWINCH, 28
-.equ SIGRTMIN, 34
-.equ SIGRTMAX, 64
+	.equ SIGTTIN, 21
+	.equ SIGTTOU, 22
+	.equ SIGWINCH, 28
+	// NOTE: do not hardcode SIGRTMIN/SIGRTMAX (see signal(7)); they vary at runtime in libc.
+	.equ KERNEL_SIGMAX, 64
 
-// errno subset
-.equ ESRCH, 3
-.equ EINTR, 4
+	// errno subset
+	.equ ESRCH, 3
+	.equ EINTR, 4
+	.equ EAGAIN, 11
 
 // timerfd/signalfd flags
 .equ TFD_CLOEXEC,   02000000

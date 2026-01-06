@@ -45,7 +45,7 @@ epoll_add_fd:
     mov rsi, EPOLL_CTL_ADD         ; arg2: op
     mov r10, rsp                   ; arg4: event pointer
     ; SYSCALL: epoll_ctl(epfd, op, fd, event)
-.ctl_retry:
+  .ctl_retry:
     mov rax, SYS_epoll_ctl
     syscall
     test rax, rax
@@ -55,6 +55,7 @@ epoll_add_fd:
     cmp rbx, EINTR
     je .ctl_retry
     LOG log_epoll_ctl_err, log_epoll_ctl_err_len
+    mov rax, -1
     jmp .ctl_out
 .ctl_ok:
     ; log added fd number (from rdx)
@@ -62,6 +63,7 @@ epoll_add_fd:
     lea rdi, [rel log_epoll_add_prefix]
     mov rsi, log_epoll_add_prefix_len
     call log_prefix_num
+    xor rax, rax
 .ctl_out:
     add rsp, EPOLL_EVENT_SIZE
     ret

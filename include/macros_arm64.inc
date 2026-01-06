@@ -1,5 +1,7 @@
 // Common macros & helpers for Linux AArch64 syscalls
 
+.extern write_all
+
 .macro SYSCALL num
     mov x8, \num
     svc #0
@@ -28,12 +30,12 @@
     mov x1, x0
     mov x0, #2
     mov x2, #18
-    SYSCALL SYS_write
+    bl write_all
     mov x0, #2
     adrp x1, \msg_ptr
     add x1, x1, :lo12:\msg_ptr
     mov x2, #\msg_len
-    SYSCALL SYS_write
+    bl write_all
 1:
     ldp x2, x3, [sp], #16
     ldp x0, x1, [sp], #16

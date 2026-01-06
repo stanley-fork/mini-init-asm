@@ -25,7 +25,7 @@ extern log_prefix_num
 
 section .rodata
 usage_msg: db "usage: mini-init-amd64 [--verbose|-v] [--version|-V] -- <cmd> [args...]", 10, 0
-version_msg: db "mini-init-amd64 0.2.0", 10, 0
+version_msg: db "mini-init-amd64 0.3.0", 10, 0
 log_first_soft: db "DEBUG: first soft signal received", 10
 log_first_soft_len: equ $ - log_first_soft
 log_escalate_kill: db "DEBUG: escalating to SIGKILL", 10
@@ -73,6 +73,14 @@ log_warn_bad_backoff: db "WARN: invalid EP_RESTART_BACKOFF_SECONDS; using defaul
 log_warn_bad_backoff_len: equ $ - log_warn_bad_backoff
 log_warn_clamp_backoff: db "WARN: EP_RESTART_BACKOFF_SECONDS too large; clamping", 10
 log_warn_clamp_backoff_len: equ $ - log_warn_clamp_backoff
+log_warn_grace_timer_unavailable: db "WARN: grace timer unavailable; escalating immediately to SIGKILL", 10
+log_warn_grace_timer_unavailable_len: equ $ - log_warn_grace_timer_unavailable
+log_warn_backoff_timer_epoll_failed: db "WARN: backoff timer could not be added to epoll; restarting immediately", 10
+log_warn_backoff_timer_epoll_failed_len: equ $ - log_warn_backoff_timer_epoll_failed
+log_info_child_exited_ignore_signal: db "DEBUG: child already exited; ignoring non-shutdown signal during restart backoff", 10
+log_info_child_exited_ignore_signal_len: equ $ - log_info_child_exited_ignore_signal
+log_info_child_exited_cancel_restart: db "DEBUG: shutdown requested during restart backoff; exiting without restart", 10
+log_info_child_exited_cancel_restart_len: equ $ - log_info_child_exited_cancel_restart
 
 section .bss
 align 8
@@ -477,12 +485,18 @@ _start:
     call get_signalfd_fd
     mov [g_sfd], rax
 
-    ; Create epoll and add signalfd
-    call epoll_create_fd
-    mov [g_epfd], rax
-    mov rdi, rax
-    mov rsi, [g_sfd]
-    call epoll_add_fd
+	    ; Create epoll and add signalfd
+	    call epoll_create_fd
+	    mov [g_epfd], rax
+	    mov rdi, rax
+	    mov rsi, [g_sfd]
+	    call epoll_add_fd
+	    cmp rax, 0
+	    jge .epoll_ok
+	    ; Fatal: can't build event loop
+	    mov rdi, 111
+	    EXIT rdi
+	.epoll_ok:
 
     ; Spawn child
     mov rbx, [g_argv_exec]
@@ -502,16 +516,43 @@ _start:
     mov rax, [g_sfd]
     cmp rbx, rax
     jne .check_timer
-    ; read signo
-    call read_signalfd_once
-    push rax               ; save signo across log_prefix_num
-    mov rdx, [rsp]
-    lea rdi, [rel log_signal_prefix]
+	    ; read signo
+	    call read_signalfd_once
+	    test rax, rax
+	    js .main_loop
+	    push rax               ; save signo across log_prefix_num
+	    mov rdx, [rsp]
+	    lea rdi, [rel log_signal_prefix]
     mov rsi, log_signal_prefix_len
     call log_prefix_num
-    pop rdx
-    cmp rdx, SIGCHLD
-    je  .handle_chld
+	    pop rdx
+	    cmp rdx, SIGCHLD
+	    je  .handle_chld
+
+	    ; If child already exited (e.g. crash + pending restart backoff), avoid
+	    ; forwarding signals to a potentially reused PGID.
+	    cmp qword [g_child_exited], 1
+	    jne .child_alive
+	    mov rax, [g_backoff_tfd]
+	    test rax, rax
+	    jz .exit_child_status
+	    ; Backoff is active: only shutdown signals cancel the restart; other signals are ignored.
+	    cmp rdx, SIGTERM
+	    je  .cancel_restart_exit
+	    cmp rdx, SIGINT
+	    je  .cancel_restart_exit
+	    cmp rdx, SIGHUP
+	    je  .cancel_restart_exit
+	    cmp rdx, SIGQUIT
+	    je  .cancel_restart_exit
+	    LOG log_info_child_exited_ignore_signal, log_info_child_exited_ignore_signal_len
+	    jmp .main_loop
+	.cancel_restart_exit:
+	    LOG log_info_child_exited_cancel_restart, log_info_child_exited_cancel_restart_len
+	.exit_child_status:
+	    mov rax, [g_child_status]
+	    EXIT rax
+	.child_alive:
     ; if not a "soft shutdown" signal, just forward and continue
     cmp rdx, SIGTERM
     je  .soft_signal
@@ -561,16 +602,34 @@ _start:
     lea rdi, [rel log_grace_secs_prefix]
     mov rsi, log_grace_secs_prefix_len
     call log_prefix_num
-    ; create timerfd for grace window
-    mov rdi, [g_grace_secs]
-    call create_grace_timerfd
-    mov [g_tfd], rax
-    ; add to epoll
-    mov rdi, [g_epfd]
-    mov rsi, [g_tfd]
-    call epoll_add_fd
-    mov qword [g_shutdown], 1
-    jmp .main_loop
+	    ; create timerfd for grace window
+	    mov rdi, [g_grace_secs]
+	    call create_grace_timerfd
+	    test rax, rax
+	    js .grace_timer_unavailable
+	    mov [g_tfd], rax
+	    ; add to epoll
+	    mov rdi, [g_epfd]
+	    mov rsi, [g_tfd]
+	    call epoll_add_fd
+	    cmp rax, 0
+	    jge .grace_timer_added
+	    ; close timerfd and escalate immediately
+	    mov rdi, [g_tfd]
+	    SYSCALL SYS_close
+	    mov qword [g_tfd], 0
+	    jmp .grace_timer_unavailable
+	.grace_timer_added:
+	    mov qword [g_shutdown], 1
+	    jmp .main_loop
+	.grace_timer_unavailable:
+	    LOG log_warn_grace_timer_unavailable, log_warn_grace_timer_unavailable_len
+	    mov qword [g_shutdown], 1
+	    mov rdi, [g_child_pid]
+	    mov rsi, SIGKILL
+	    call forward_signal_to_group
+	    mov qword [g_killed], 1
+	    jmp .main_loop
 
 .check_timer:
     ; Check if this is the backoff timer
@@ -579,7 +638,7 @@ _start:
     jz .check_grace_timer
     cmp rbx, rax
     jne .check_grace_timer
-    ; Backoff timer expired -> restart child
+	    ; Backoff timer expired -> restart child
     mov rdi, rax
     call read_timerfd_tick
     ; Close backoff timerfd
@@ -592,10 +651,10 @@ _start:
     mov rax, [g_child_status]
     EXIT rax
 .do_backoff_restart:
-    ; Reset state for restart
-    mov qword [g_child_exited], 0
-    mov qword [g_shutdown], 0
-    mov qword [g_killed], 0
+	    ; Reset state for restart
+	    mov qword [g_child_exited], 0
+	    mov qword [g_shutdown], 0
+	    mov qword [g_killed], 0
     ; Spawn new child
     mov rbx, [g_argv_exec]
     mov rsi, [g_envp]
@@ -704,18 +763,26 @@ _start:
     lea rdi, [rel log_restart_backoff_prefix]
     mov rsi, log_restart_backoff_prefix_len
     call log_prefix_num
-    ; Create backoff timerfd
-    mov rdi, r9
-    call create_grace_timerfd
-    mov [g_backoff_tfd], rax
-    test rax, rax
-    js .restart_immediately  ; If timerfd creation failed, restart immediately
-    ; Add backoff timerfd to epoll
-    mov rdi, [g_epfd]
-    mov rsi, [g_backoff_tfd]
-    call epoll_add_fd
-    LOG log_backoff_wait, log_backoff_wait_len
-    jmp .main_loop
+	    ; Create backoff timerfd
+	    mov rdi, r9
+	    call create_grace_timerfd
+	    mov [g_backoff_tfd], rax
+	    test rax, rax
+	    js .restart_immediately  ; If timerfd creation failed, restart immediately
+	    ; Add backoff timerfd to epoll
+	    mov rdi, [g_epfd]
+	    mov rsi, [g_backoff_tfd]
+	    call epoll_add_fd
+	    cmp rax, 0
+	    jge .backoff_added
+	    LOG log_warn_backoff_timer_epoll_failed, log_warn_backoff_timer_epoll_failed_len
+	    mov rdi, [g_backoff_tfd]
+	    SYSCALL SYS_close
+	    mov qword [g_backoff_tfd], 0
+	    jmp .restart_immediately
+	.backoff_added:
+	    LOG log_backoff_wait, log_backoff_wait_len
+	    jmp .main_loop
 .restart_immediately:
     ; Reset state for restart
     mov qword [g_child_exited], 0

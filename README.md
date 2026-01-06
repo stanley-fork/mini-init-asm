@@ -49,20 +49,20 @@ a few **runtime semantics**.
 
 ### High-level comparison
 
-| Aspect                          | **mini-init-asm**                                            | **Tini**                                                                               |
-|---------------------------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| Language                        | x86-64 NASM + ARM64 GAS                                      | C                                                                                      |
-| Architectures                   | amd64, arm64                                                 | Many (amd64, arm, armhf, i386, etc. – see releases)                                   |
-| Binary type                     | Static, **no libc**, pure Linux syscalls                    | Dynamic + static variants; depends on libc                                            |
-| Default kill mode              | Always kills **process group** (`kill(-pgid, sig)`)          | By default kills **child only**, group-kill via `-g` / `TINI_KILL_PROCESS_GROUP`      |
-| Session / PGID                 | Always creates **new session + PGID** for child              | Optional group-kill mode; no hard “PGID-mode only” branding                            |
-| Signal handling                | `signalfd(2)` + `epoll(7)` + `timerfd(2)` event loop         | traditional signal handlers + wait / reaping loop                                      |
-| Subreaper support              | `EP_SUBREAPER=1` env (uses `PR_SET_CHILD_SUBREAPER`)         | `-s` flag or `TINI_SUBREAPER` env                                                      |
-| Restart-on-crash               | Yes, via `EP_RESTART_*` env vars (simple supervisor mode)    | No (Tini intentionally does **not** supervise / restart children)                     |
-| Exit code mapping              | `EP_EXIT_CODE_BASE` (base + signal number)                   | `-e` flags to remap specific exit codes to 0                                           |
-| Config surface                 | Mostly **env vars** + minimal flags (`-v`, `-V`)             | CLI flags (`-v`, `-s`, `-g`, `-e`, `-p`, …) + env vars                                |
-| Ecosystem integration          | Standalone binary, Dockerfile provided                       | Packaged in many distros; integrated into Docker via `--init`                         |
-| Size (qualitative)             | Tiny static binary (pure asm, no libc; tens-of-KB range)     | Tiny dynamic binary (~10KB), static version still <1MB (per upstream docs)            |
+| Aspect                            | **mini-init-asm**                                              | **Tini**                                                                                 |
+| --------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Language                          | x86-64 NASM + ARM64 GAS                                        | C                                                                                        |
+| Architectures                     | amd64, arm64                                                   | Many (amd64, arm, armhf, i386, etc. – see releases)                                      |
+| Binary type                       | Static, **no libc**, pure Linux syscalls                       | Dynamic + static variants; depends on libc                                               |
+| Default kill mode                 | Always kills **process group** (`kill(-pgid, sig)`)            | By default kills **child only**, group-kill via `-g` / `TINI_KILL_PROCESS_GROUP`         |
+| Session / PGID                    | Always creates **new session + PGID** for child                | Optional group-kill mode; no hard “PGID-mode only” branding                              |
+| Signal handling                   | `signalfd(2)` + `epoll(7)` + `timerfd(2)` event loop           | traditional signal handlers + wait / reaping loop                                        |
+| Subreaper support                 | `EP_SUBREAPER=1` env (uses `PR_SET_CHILD_SUBREAPER`)           | `-s` flag or `TINI_SUBREAPER` env                                                        |
+| Restart-on-crash                  | Yes, via `EP_RESTART_*` env vars (simple supervisor mode)      | No (Tini intentionally does **not** supervise / restart children)                        |
+| Exit code mapping                 | `EP_EXIT_CODE_BASE` (base + signal number)                     | `-e` flags to remap specific exit codes to 0                                             |
+| Config surface                    | Mostly **env vars** + minimal flags (`-v`, `-V`)               | CLI flags (`-v`, `-s`, `-g`, `-e`, `-p`, …) + env vars                                   |
+| Ecosystem integration             | Standalone binary, Dockerfile provided                         | Packaged in many distros; integrated into Docker via `--init`                            |
+| Size (qualitative)                | Tiny static binary (pure asm, no libc; tens-of-KB range)       | Tiny dynamic binary (~10KB), static version still <1MB (per upstream docs)               |
 
 > The goal of `mini-init-asm` is **not** to replace Tini everywhere, but to offer:
 >
@@ -72,7 +72,7 @@ a few **runtime semantics**.
 
 ### Feature matrix (plain PID1 vs Tini vs mini-init-asm)
 
-| Feature / Behavior           | Plain app as PID 1          | Tini                          | mini-init-asm (this repo)                       |
+| Feature / Behavior          | Plain app as PID 1          | Tini                          | mini-init-asm (this repo)                       |
 |-----------------------------|-----------------------------|-------------------------------|-------------------------------------------------|
 | Signal forwarding           | Depends on app              | Yes                           | Yes (group-wide)                                |
 | Zombie reaping              | Depends on app              | Yes                           | Yes                                             |
@@ -81,6 +81,17 @@ a few **runtime semantics**.
 | Restart on crash            | Depends on app              | No                            | Yes (`EP_RESTART_*` envs)                       |
 | Pure-syscall implementation | Rare                        | No (libc)                     | Yes                                             |
 | Minimal config surface      | N/A                         | CLI + env                     | Primarily env, very small CLI                   |
+
+### Note (why choose this vs tini?)
+
+Most Linuxes already provides well-established init helpers (notably `tini`) and Docker can enable one via `--init`.
+`mini-init-asm` is mainly useful when you specifically want:
+
+- A pure-syscall, libc-free implementation (e.g. for very small/static images or audit/learning goals).
+- Process-group forwarding as the default behavior (PGID-first “entrypoint init” semantics).
+- Optional restart-on-crash behavior (Tini intentionally does not supervise/restart children).
+
+If you just need a battle-tested, widely deployed init with broad architecture coverage and a long track record, prefer `tini`.
 
 ---
 
@@ -114,6 +125,21 @@ sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 make build-arm64
 ```
 
+### Native build (ARM64 host)
+
+On an ARM64 machine, you can build natively:
+
+```bash
+sudo apt-get install -y make binutils
+make build-arm64
+```
+
+And you can run the regular test scripts against the ARM64 binary:
+
+```bash
+bash scripts/test_harness_arm64.sh build/mini-init-arm64
+```
+
 ### Example run (ARM64 via QEMU on x86 host)
 
 Requires `qemu-user-static` to run an ARM64 binary on x86:
@@ -128,6 +154,11 @@ qemu-aarch64-static -- ./build/mini-init-arm64 -- /bin/sh -c 'echo hello && slee
 
 If you see a usage message like `usage: mini-init-arm64 ...`, the `--` delimiter was swallowed
 by QEMU. Use the extra `--` right after `qemu-aarch64-static`.
+
+> Note: QEMU user-mode emulation can be flaky for the full epoll/signalfd/timerfd loop on some hosts.
+> CI therefore uses `EP_ARM64_FALLBACK=1` for a minimal smoke test, and additionally runs native ARM64
+> tests for tagged releases when an ARM64 runner is available. For higher confidence, run tests on real
+> ARM64 hardware or use full-system emulation (qemu-system-aarch64) for integration tests.
 
 ### Graceful stop demo
 
@@ -184,12 +215,19 @@ Numeric env vars are parsed as **non-negative decimal**. If a value is invalid/o
 
 - `EP_SIGNALS`
   CSV of **additional** signal names to monitor/forward (case-sensitive).
-  Supported names: `USR1,USR2,PIPE,WINCH,TTIN,TTOU,CONT,ALRM,RT1,...,RT30`
-  (`RTN` = `SIGRTMIN+N`, 1–30).
+  Supported tokens:
+  - Named: `USR1,USR2,PIPE,WINCH,TTIN,TTOU,CONT,ALRM`
+  - Numeric: decimal signal numbers `1..64` (SIGKILL and SIGSTOP are ignored)
+  - Real-time: `RT1..RT30` (\=`SIGRTMIN+N`), only if `EP_SIGRTMIN` and `EP_SIGRTMAX` are set (see below)
   These **augment** the built-in set: `HUP,INT,QUIT,TERM,CHLD` plus default forwarding
   of `USR1,USR2,PIPE,WINCH,TTIN,TTOU,CONT,ALRM`.
   Unknown tokens are ignored with a warning. In verbose mode we only log
   “EP_SIGNALS parsed” if the variable is present (even if empty).
+
+- `EP_SIGRTMIN`, `EP_SIGRTMAX`
+  Decimal runtime values for SIGRTMIN/SIGRTMAX in the target libc environment.
+  Required to enable `RT*` tokens in `EP_SIGNALS`.
+  This avoids hardcoding RT signal numbers (see `signal(7)`; SIGRTMIN can vary at runtime on glibc with threads).
 
 - `EP_SUBREAPER`
   If set to `1`, enables `PR_SET_CHILD_SUBREAPER` so that `mini-init-asm` adopts orphaned
@@ -246,7 +284,8 @@ EP_GRACE_SECONDS=5 ./build/mini-init-amd64 -- ./your-app
 EP_SIGNALS=USR1 ./build/mini-init-amd64 -- ./your-app
 
 # Add RT signals (RT1 = SIGRTMIN+1, RT5 = SIGRTMIN+5)
-EP_SIGNALS=RT1,RT5 ./build/mini-init-amd64 -- ./your-app
+# RT tokens are only enabled if you provide runtime SIGRTMIN/SIGRTMAX explicitly:
+EP_SIGRTMIN=34 EP_SIGRTMAX=64 EP_SIGNALS=RT1,RT5 ./build/mini-init-amd64 -- ./your-app
 
 # Enable subreaper mode (adopt orphaned grandchildren)
 EP_SUBREAPER=1 ./build/mini-init-amd64 -- ./your-app
@@ -313,7 +352,6 @@ mini-init-asm/
 ├─ ROADMAP.md
 ├─ LICENSE
 ├─ Makefile
-├─ .gitlab-ci.yml
 ├─ include/
 │  ├─ macros.inc              # x86-64 syscall/log helpers
 │  ├─ macros_arm64.inc        # arm64 syscall/log helpers

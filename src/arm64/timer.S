@@ -67,9 +67,30 @@ read_timerfd_tick:
     sub sp, sp, #8
     mov x1, sp
     mov x2, #8
+1:
     SYSCALL SYS_read
-    add sp, sp, #8
+    cmp x0, #8
+    beq 2f
+    cmp x0, #0
+    bgt 3f
+    beq 4f
+    neg x4, x0
+    cmp x4, #EINTR
+    beq 1b
+    cmp x4, #EAGAIN
+    beq 2f              // already drained
+    b 5f
+2:
     mov x0, #0
+    b 6f
+3:  // short read
+4:  // eof
+    mov x0, #-1
+    b 6f
+5:
+    // keep negative errno in x0
+6:
+    add sp, sp, #8
     ret
 
 .section .rodata

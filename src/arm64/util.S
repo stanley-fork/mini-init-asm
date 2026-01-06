@@ -1,3 +1,4 @@
+.include "syscalls_aarch64.inc"
 .include "macros_arm64.inc"
 
 .text
@@ -80,3 +81,45 @@ parse_u64_dec_checked:
 .bad:
     mov x1, #0
     ret
+
+.global write_all
+.type write_all, %function
+// write_all(fd=x0, buf=x1, len=x2) -> x0=0 on success, negative errno on error
+// Retries on EINTR; handles partial writes.
+write_all:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+
+    mov x19, x0        // fd
+    mov x20, x1        // buf
+    mov x21, x2        // remaining
+    cbz x21, .write_all_ok
+
+.write_all_loop:
+    mov x0, x19
+    mov x1, x20
+    mov x2, x21
+    SYSCALL SYS_write
+    cmp x0, #0
+    bgt .write_all_wrote
+    beq .write_all_err0
+    neg x4, x0
+    cmp x4, #EINTR
+    beq .write_all_loop
+    b .out
+.write_all_wrote:
+    sub x21, x21, x0
+    add x20, x20, x0
+    cbnz x21, .write_all_loop
+.write_all_ok:
+    mov x0, #0
+.out:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+.write_all_err0:
+    mov x0, #-1
+    b .out

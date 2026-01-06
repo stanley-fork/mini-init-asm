@@ -10,13 +10,20 @@ ARM64_SRC_DIR    := src/arm64
 
 NASM             := nasm
 LD               := ld
-NASMFLAGS        := -f elf64 -I$(INC_DIR)/ -g -F dwarf
-LDFLAGS          := -nostdlib -z noexecstack
+DEBUG            ?= 1
 
-ARM64_AS         ?= aarch64-linux-gnu-as
-ARM64_LD         ?= aarch64-linux-gnu-ld
-ARM64_ASFLAGS    ?= -g
-ARM64_LDFLAGS    ?= -nostdlib -z noexecstack
+NASMFLAGS        := -f elf64 -I$(INC_DIR)/
+LDFLAGS          := -nostdlib -z noexecstack -z relro -z now --build-id=sha1
+
+ARM64_AS         ?= $(shell command -v aarch64-linux-gnu-as 2>/dev/null || echo as)
+ARM64_LD         ?= $(shell command -v aarch64-linux-gnu-ld 2>/dev/null || echo ld)
+ARM64_ASFLAGS    ?=
+ARM64_LDFLAGS    ?= -nostdlib -z noexecstack -z relro -z now --build-id=sha1
+
+ifeq ($(DEBUG),1)
+NASMFLAGS        += -g -F dwarf
+ARM64_ASFLAGS    += -g
+endif
 
 AMD64_BUILD_DIR  := $(BUILD_DIR)/amd64
 ARM64_BUILD_DIR  := $(BUILD_DIR)/arm64

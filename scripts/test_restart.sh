@@ -46,7 +46,7 @@ test "$wait_rc" -eq 0 || {
 
 # Test 2: Restart with backoff
 echo "[test] 2) Restart with backoff delay"
-start_time=$(date +%s)
+start_uptime="$(awk '{print $1}' /proc/uptime)"
 # Child will crash immediately, then restart after 2 second backoff, then crash again
 # With EP_MAX_RESTARTS=1, we allow 1 restart (2 total runs)
 # First crash happens immediately, then backoff wait (2s), then restart, then second crash
@@ -57,12 +57,13 @@ set +e
 wait "$init_pid"
 wait_rc=$?
 set -e
-end_time=$(date +%s)
-elapsed=$((end_time - start_time))
-echo "[test] rc=$wait_rc, elapsed=${elapsed}s"
-# Should take at least 2 seconds due to backoff (first crash -> backoff 2s -> restart -> second crash)
-test "$elapsed" -ge 2 || {
-    echo "FAIL: Backoff not working (elapsed=${elapsed}s, expected >= 2s)"
+end_uptime="$(awk '{print $1}' /proc/uptime)"
+elapsed="$(awk -v s="$start_uptime" -v e="$end_uptime" 'BEGIN{printf "%.3f", (e-s)}')"
+echo "[test] rc=$wait_rc, elapsed=${elapsed}s (monotonic)"
+# Should take ~2 seconds due to backoff (first crash -> backoff 2s -> restart -> second crash).
+# Use monotonic /proc/uptime and allow some scheduling jitter.
+awk -v s="$start_uptime" -v e="$end_uptime" 'BEGIN{exit !((e-s) >= 1.8)}' || {
+    echo "FAIL: Backoff not working (elapsed=${elapsed}s, expected around 2s)"
     exit 1
 }
 # Should exit with SIGSEGV code (139) after max restarts
@@ -169,8 +170,10 @@ test "$wait_rc" -eq 0 || {
 }
 
 echo "[test] 7) Shutdown during restart backoff prevents restart (exits promptly)"
+tmp_backoff_log="$(mktemp)"
+trap 'rm -f "$tmp_backoff_log"' EXIT
 EP_RESTART_ENABLED=1 EP_MAX_RESTARTS=0 EP_RESTART_BACKOFF_SECONDS=5 EP_GRACE_SECONDS=5 \
-  "$BIN" -v -- /bin/sh -c "kill -SEGV \$\$" &
+  "$BIN" -v -- /bin/sh -c "kill -SEGV \$\$" 2>"$tmp_backoff_log" &
 init_pid=$!
 sleep 0.5
 kill -TERM "$init_pid" 2>/dev/null || true
@@ -187,6 +190,12 @@ fi
 echo "[test] rc=$wait_rc"
 test "$wait_rc" -eq 139 || {
     echo "FAIL: Expected 139 (SIGSEGV mapped) after shutdown during backoff, got $wait_rc"
+    exit 1
+}
+grep -q "shutdown requested during restart backoff" "$tmp_backoff_log" || {
+    echo "FAIL: Expected log indicating restart was cancelled during backoff"
+    echo "--- stderr ---"
+    cat "$tmp_backoff_log" >&2
     exit 1
 }
 
