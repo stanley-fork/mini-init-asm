@@ -184,9 +184,9 @@ setup_signals_and_fd:
     add x1, x1, #1
     b .tok_scan
 .tok_done:
-    mov x4, x1          // token end (delimiter or NUL)
+    mov x24, x1         // token end (delimiter or NUL)
     // trim trailing spaces
-    mov x10, x4
+    mov x10, x24
 .trim_end:
     cmp x10, x3
     ble .trim_done
@@ -382,7 +382,7 @@ setup_signals_and_fd:
     bl set_sig_bit
 
 .after_token:
-    mov x1, x4
+    mov x1, x24
     ldrb w2, [x1]
     cbz w2, .after_env
     add x1, x1, #1
