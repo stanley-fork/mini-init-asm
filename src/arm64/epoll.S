@@ -16,16 +16,23 @@ epoll_events_buf:
 .extern get_timestamp_ptr
 
 epoll_create_fd:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
     mov x0, #EPOLL_CLOEXEC
     SYSCALL SYS_epoll_create1
     cmp x0, #0
     blt .ret
-    mov x2, x0
+    mov x19, x0
+    mov x2, x19
     adrp x0, log_epfd_prefix
     add x0, x0, :lo12:log_epfd_prefix
     mov x1, #log_epfd_prefix_len
     bl log_prefix_num
+    mov x0, x19
 .ret:
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
     ret
 
 epoll_add_fd:

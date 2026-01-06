@@ -29,9 +29,9 @@
 
 .section .rodata
 .align 3
-usage_msg:         .asciz "usage: mini-init-arm64 [--verbose|-v] [--version|-V] -- <cmd> [args...]"
+usage_msg:         .asciz "usage: mini-init-arm64 [--verbose|-v] [--version|-V] -- <cmd> [args...]\n"
 .equ usage_msg_len, . - usage_msg - 1
-version_msg:       .asciz "mini-init-arm64 0.3.0"
+version_msg:       .asciz "mini-init-arm64 0.3.0\n"
 log_first_soft:    .asciz "DEBUG: first soft signal received"
 .equ log_first_soft_len, . - log_first_soft - 1
 log_escalate_kill: .asciz "DEBUG: escalating to SIGKILL"

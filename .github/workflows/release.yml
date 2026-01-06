@@ -26,7 +26,7 @@ jobs:
 
       - name: Build and test amd64
         run: |
-          make test-all
+          timeout 5m make test-all
           strip build/mini-init-amd64
 
       - name: Upload amd64 artifact
@@ -51,12 +51,12 @@ jobs:
 
       - name: Build arm64 binary
         run: |
-          make build-arm64
+          timeout 5m make build-arm64
           aarch64-linux-gnu-strip build/mini-init-arm64
 
       - name: ARM64 fallback smoke (QEMU-user)
         run: |
-          ARM64_FALLBACK=1 EP_ARM64_FALLBACK=1 bash scripts/test_harness_arm64.sh build/mini-init-arm64
+          timeout 2m env ARM64_FALLBACK=1 EP_ARM64_FALLBACK=1 bash scripts/test_harness_arm64.sh build/mini-init-arm64
 
       - name: Upload arm64 artifact
         uses: actions/upload-artifact@v4
@@ -69,7 +69,7 @@ jobs:
   test-arm64-native:
     name: Test arm64 (native runner)
     runs-on: ubuntu-24.04-arm
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,13 +81,13 @@ jobs:
 
       - name: Build and test arm64
         run: |
-          make DEBUG=0 build-arm64
-          bash scripts/test_harness.sh build/mini-init-arm64
-          bash scripts/test_ep_signals.sh build/mini-init-arm64
-          bash scripts/test_edge_cases.sh build/mini-init-arm64
-          bash scripts/test_exit_code_mapping.sh build/mini-init-arm64
-          bash scripts/test_restart.sh build/mini-init-arm64
-          bash scripts/test_diagnostics.sh build/mini-init-arm64
+          timeout 5m make DEBUG=0 build-arm64
+          timeout 2m bash scripts/test_harness.sh build/mini-init-arm64
+          timeout 2m bash scripts/test_ep_signals.sh build/mini-init-arm64
+          timeout 2m bash scripts/test_edge_cases.sh build/mini-init-arm64
+          timeout 2m bash scripts/test_exit_code_mapping.sh build/mini-init-arm64
+          timeout 2m bash scripts/test_restart.sh build/mini-init-arm64
+          timeout 2m bash scripts/test_diagnostics.sh build/mini-init-arm64
 
   debian-package:
     name: Debian package build (lintian)
@@ -119,7 +119,7 @@ jobs:
       - name: Build Debian package
         working-directory: ci/debian-build/src
         run: |
-          dpkg-buildpackage -us -uc -b
+          timeout 10m dpkg-buildpackage -us -uc -b
 
       - name: Lintian (fail on warnings)
         working-directory: ci/debian-build/src

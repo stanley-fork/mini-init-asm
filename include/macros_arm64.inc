@@ -22,6 +22,7 @@
 .macro LOG msg_ptr, msg_len
     stp x0, x1, [sp, #-16]!
     stp x2, x3, [sp, #-16]!
+    str x30, [sp, #-16]!
     adrp x3, g_verbose
     add x3, x3, :lo12:g_verbose
     ldr x3, [x3]
@@ -36,7 +37,17 @@
     add x1, x1, :lo12:\msg_ptr
     mov x2, #\msg_len
     bl write_all
+    // newline (keep stack 16-byte aligned)
+    sub sp, sp, #16
+    mov w4, #'\n'
+    strb w4, [sp]
+    mov x0, #2
+    mov x1, sp
+    mov x2, #1
+    bl write_all
+    add sp, sp, #16
 1:
+    ldr x30, [sp], #16
     ldp x2, x3, [sp], #16
     ldp x0, x1, [sp], #16
 .endm
