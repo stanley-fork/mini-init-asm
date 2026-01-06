@@ -84,7 +84,7 @@ a few **runtime semantics**.
 
 ### Note (why choose this vs tini?)
 
-Most Linuxes already provides well-established init helpers (notably `tini`) and Docker can enable one via `--init`.
+Most distros already provides well-established init helpers (notably `tini`) and Docker can enable one via `--init`.
 `mini-init-asm` is mainly useful when you specifically want:
 
 - A pure-syscall, libc-free implementation (e.g. for very small/static images or audit/learning goals).

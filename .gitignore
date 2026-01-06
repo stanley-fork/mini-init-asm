@@ -49,6 +49,7 @@
 build/
 
 # Debian packaging build artifacts
+ci/debian-build/
 debian/.debhelper/
 debian/tmp/
 debian/mini-init-asm/

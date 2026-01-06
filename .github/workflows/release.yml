@@ -77,12 +77,17 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make binutils
+          sudo apt-get install -y bash make binutils
 
       - name: Build and test arm64
         run: |
           make DEBUG=0 build-arm64
-          bash scripts/test_harness_arm64.sh build/mini-init-arm64
+          bash scripts/test_harness.sh build/mini-init-arm64
+          bash scripts/test_ep_signals.sh build/mini-init-arm64
+          bash scripts/test_edge_cases.sh build/mini-init-arm64
+          bash scripts/test_exit_code_mapping.sh build/mini-init-arm64
+          bash scripts/test_restart.sh build/mini-init-arm64
+          bash scripts/test_diagnostics.sh build/mini-init-arm64
 
   debian-package:
     name: Debian package build (lintian)
@@ -95,13 +100,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            binutils debhelper devscripts dpkg-dev fakeroot lintian make nasm
+            binutils build-essential debhelper devscripts dpkg-dev fakeroot lintian make nasm
+
+      - name: Prepare build tree (keep artifacts in workspace)
+        run: |
+          rm -rf ci/debian-build
+          mkdir -p ci/debian-build/src
+          tar \
+            --exclude='./.git' \
+            --exclude='./build' \
+            --exclude='./ci/debian-build' \
+            --exclude='./debian/.debhelper' \
+            --exclude='./debian/tmp' \
+            --exclude='./debian/mini-init-asm' \
+            --exclude='./debian/mini-init-asm-dbgsym' \
+            -cf - . | tar -C ci/debian-build/src -xf -
 
       - name: Build Debian package
+        working-directory: ci/debian-build/src
         run: |
           dpkg-buildpackage -us -uc -b
 
       - name: Lintian (fail on warnings)
+        working-directory: ci/debian-build/src
         run: |
           lintian --fail-on warning --display-info --tag-display-limit 0 ../*.deb
 
@@ -110,11 +131,10 @@ jobs:
         with:
           name: debian-packaging-${{ github.sha }}
           path: |
-            ../*.deb
-            ../*.buildinfo
-            ../*.changes
-            ../*.dsc
-            ../*.tar.*
+            ci/debian-build/*.deb
+            ci/debian-build/*.ddeb
+            ci/debian-build/*.buildinfo
+            ci/debian-build/*.changes
           if-no-files-found: error
           retention-days: 7
 
