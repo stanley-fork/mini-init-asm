@@ -1,4 +1,31 @@
+<!-- markdownlint-disable MD024 -->
 # Changelog
+
+## 0.3.1 - 2026-01-11
+
+### Fixed
+
+- Fix `debian/control` Architecture field: changed from `any` to `amd64 arm64` to prevent FTBFS on unsupported architectures.
+- Add explicit `make` to Build-Depends for reproducible builds across all environments.
+
+### Improved
+
+- Implement VERSION single source of truth: version now controlled by `VERSION` file at repository root.
+- Auto-generate arch-specific version include files (`include/version_amd64.inc`, `include/version_arm64.inc`) during build.
+- Version string length now calculated dynamically (no hardcoded lengths).
+- Version bumps now require changing only 1 file instead of 4 separate locations.
+
+### Tests/Docs
+
+- Add restart-on-crash test to `debian/tests/smoke`: validates `EP_RESTART_ENABLED` and `EP_MAX_RESTARTS` functionality.
+- Add PGID signal fan-out test to `debian/tests/smoke`: verifies signals reach both child and grandchild processes.
+- Autopkgtest now validates 5 critical behaviors (was 3).
+- Document that `EP_ARM64_FALLBACK` mode is NOT suitable for production (CI testing stub only).
+- List features NOT available in fallback mode: signal forwarding, graceful shutdown, restart, custom EP_SIGNALS.
+- Add restart configuration best practices: guidance on backoff delays and restart limits to prevent tight CPU loops.
+- Add Debian packaging guide section with build instructions, autopkgtest usage, lintian checks, and supported architectures.
+- Update man page date and version metadata to match VERSION file.
+- Document that ARM64 native tests run on every PR (validates full epoll/signalfd path).
 
 ## 0.3.0 - 2026-01-06
 

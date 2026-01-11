@@ -266,7 +266,18 @@ Numeric env vars are parsed as **non-negative decimal**. If a value is invalid/o
 - `EP_ARM64_FALLBACK` (ARM64/QEMU only)
   If set to `1`, ARM64 builds skip the epoll/signalfd path and use a simpler
   `wait4` loop. Intended as a workaround for QEMU user-mode flakiness in CI smoke tests.
-  This mode does **not** provide the full signal-forwarding/grace-timer behavior; it primarily verifies spawn + exit-code propagation.
+
+  **WARNING:** This mode is a CI testing stub and is **NOT suitable for production use**.
+  It does **NOT** provide:
+  - Signal forwarding to child process group
+  - Graceful shutdown with grace period escalation
+  - Restart-on-crash functionality
+  - Custom signal monitoring (EP_SIGNALS)
+
+  Fallback mode only verifies basic spawn and exit code propagation. Use it **only**
+  for CI smoke testing under QEMU user-mode emulation. For production, run the full
+  binary on native ARM64 hardware or use full-system emulation.
+
   In fallback mode, verbose logs may omit timestamps to avoid QEMU-user emulation issues.
   Default: `0` (CI jobs typically set this).
 
@@ -305,6 +316,34 @@ EP_RESTART_ENABLED=1 EP_MAX_RESTARTS=5 EP_RESTART_BACKOFF_SECONDS=2 \
 # Unlimited restarts, no backoff
 EP_RESTART_ENABLED=1 EP_MAX_RESTARTS=0 EP_RESTART_BACKOFF_SECONDS=0 \
   ./build/mini-init-amd64 -- ./your-app
+```
+
+### Best Practices
+
+#### Restart Configuration
+
+When enabling restart-on-crash (`EP_RESTART_ENABLED=1`):
+
+- **Always set a backoff delay** (`EP_RESTART_BACKOFF_SECONDS`) to prevent tight restart loops
+  - Recommended minimum: `1` second (default)
+  - For flaky apps: `5-10` seconds
+
+- **Set a restart limit** (`EP_MAX_RESTARTS`) to prevent infinite loops on persistent failures
+  - Recommended: `3-5` restarts for transient errors
+  - Use `0` (unlimited) only for long-running services with rare crashes
+
+**Example - Good configuration:**
+```bash
+# Bounded restarts with backoff (recommended)
+EP_RESTART_ENABLED=1 EP_MAX_RESTARTS=3 EP_RESTART_BACKOFF_SECONDS=5 \
+  ./build/mini-init-amd64 -- ./my-app
+```
+
+**Example - Dangerous configuration:**
+```bash
+# Unlimited restarts with no delay (tight loop on immediate crash - avoid!)
+EP_RESTART_ENABLED=1 EP_MAX_RESTARTS=0 EP_RESTART_BACKOFF_SECONDS=0 \
+  ./build/mini-init-amd64 -- ./my-app
 ```
 
 ### Exit code semantics
@@ -474,6 +513,52 @@ bash scripts/test_diagnostics.sh build/mini-init-arm64
 
 > **Note:** ARM64 tests run under QEMU user emulation and may differ slightly in timing or fail on some
 > hosts; for full determinism use native ARM64.
+
+---
+
+## Debian Packaging
+
+### Package Information
+
+The Debian package `mini-init-asm` provides a unified binary:
+- **Installed at:** `/usr/bin/mini-init-asm`
+- **Architecture-specific:** Built for `amd64` and `arm64` only
+- **Statically linked:** No runtime dependencies (libc-free)
+
+### Building the Debian Package
+
+```bash
+# Install build dependencies
+sudo apt-get install debhelper-compat binutils nasm make
+
+# Build binary package
+dpkg-buildpackage -us -uc -b
+
+# Install locally
+sudo dpkg -i ../mini-init-asm_*.deb
+```
+
+### Running Autopkgtest
+
+```bash
+# After installing package
+autopkgtest . -- null
+
+# Or from source tree with schroot
+autopkgtest -B . -- schroot unstable-amd64
+```
+
+### Lintian Check
+
+```bash
+lintian --fail-on warning --display-info ../mini-init-asm_*.deb
+```
+
+### Supported Architectures
+
+Currently supported: **amd64**, **arm64**
+
+Other architectures are not supported due to the assembly implementation.
 
 ---
 

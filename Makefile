@@ -1,4 +1,6 @@
 # Build configuration
+VERSION          := $(shell cat VERSION 2>/dev/null || echo "unknown")
+
 BUILD_DIR        ?= build
 INC_DIR          := include
 
@@ -17,13 +19,24 @@ LDFLAGS          := -nostdlib -z noexecstack -z relro -z now --build-id=sha1
 
 ARM64_AS         ?= $(shell command -v aarch64-linux-gnu-as 2>/dev/null || echo as)
 ARM64_LD         ?= $(shell command -v aarch64-linux-gnu-ld 2>/dev/null || echo ld)
-ARM64_ASFLAGS    ?=
+ARM64_ASFLAGS    ?= -I$(INC_DIR)
 ARM64_LDFLAGS    ?= -nostdlib -z noexecstack -z relro -z now --build-id=sha1
 
 ifeq ($(DEBUG),1)
 NASMFLAGS        += -g -F dwarf
 ARM64_ASFLAGS    += -g
 endif
+
+# Generate version include files for both architectures
+$(INC_DIR)/version_amd64.inc: VERSION
+	@echo '; Auto-generated version file' > $@
+	@echo 'version_msg_str: db "mini-init-amd64 $(VERSION)", 10, 0' >> $@
+	@echo 'version_msg_len_val: equ $$ - version_msg_str - 1' >> $@
+
+$(INC_DIR)/version_arm64.inc: VERSION
+	@echo '// Auto-generated version file' > $@
+	@echo 'version_msg_arm64: .asciz "mini-init-arm64 $(VERSION)\n"' >> $@
+	@echo '.equ version_msg_arm64_len, . - version_msg_arm64 - 1' >> $@
 
 AMD64_BUILD_DIR  := $(BUILD_DIR)/amd64
 ARM64_BUILD_DIR  := $(BUILD_DIR)/arm64
@@ -70,11 +83,11 @@ $(AMD64_BUILD_DIR):
 $(ARM64_BUILD_DIR):
 	mkdir -p $@
 
-$(AMD64_BUILD_DIR)/%.o: $(AMD64_SRC_DIR)/%.asm $(INC_DIR)/*.inc | $(AMD64_BUILD_DIR)
+$(AMD64_BUILD_DIR)/%.o: $(AMD64_SRC_DIR)/%.asm $(INC_DIR)/*.inc $(INC_DIR)/version_amd64.inc | $(AMD64_BUILD_DIR)
 	$(NASM) $(NASMFLAGS) $< -o $@
 
-$(ARM64_BUILD_DIR)/%.o: $(ARM64_SRC_DIR)/%.S $(INC_DIR)/*.inc | $(ARM64_BUILD_DIR)
-	$(ARM64_AS) $(ARM64_ASFLAGS) -I$(INC_DIR) $< -o $@
+$(ARM64_BUILD_DIR)/%.o: $(ARM64_SRC_DIR)/%.S $(INC_DIR)/*.inc $(INC_DIR)/version_arm64.inc | $(ARM64_BUILD_DIR)
+	$(ARM64_AS) $(ARM64_ASFLAGS) $< -o $@
 
 # Helper objects
 $(ARM64_BUILD_DIR)/helpers/%.o: $(ARM64_SRC_DIR)/helpers/%.S $(INC_DIR)/*.inc | $(ARM64_BUILD_DIR)

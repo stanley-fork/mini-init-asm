@@ -31,7 +31,7 @@
 .align 3
 usage_msg:         .asciz "usage: mini-init-arm64 [--verbose|-v] [--version|-V] -- <cmd> [args...]\n"
 .equ usage_msg_len, . - usage_msg - 1
-version_msg:       .asciz "mini-init-arm64 0.3.0\n"
+.include "version_arm64.inc"
 log_first_soft:    .asciz "DEBUG: first soft signal received"
 .equ log_first_soft_len, . - log_first_soft - 1
 log_escalate_kill: .asciz "DEBUG: escalating to SIGKILL"
@@ -265,9 +265,9 @@ _start:
 
 .show_version:
     mov x0, #1
-    adrp x1, version_msg
-    add x1, x1, :lo12:version_msg
-    mov x2, #21
+    adrp x1, version_msg_arm64
+    add x1, x1, :lo12:version_msg_arm64
+    mov x2, version_msg_arm64_len
     SYSCALL SYS_write
     mov x0, #0
     SYSCALL SYS_exit

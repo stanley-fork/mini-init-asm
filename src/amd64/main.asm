@@ -25,7 +25,9 @@ extern log_prefix_num
 
 section .rodata
 usage_msg: db "usage: mini-init-amd64 [--verbose|-v] [--version|-V] -- <cmd> [args...]", 10, 0
-version_msg: db "mini-init-amd64 0.3.0", 10, 0
+%include "version_amd64.inc"
+version_msg: equ version_msg_str
+version_msg_len: equ version_msg_len_val
 log_first_soft: db "DEBUG: first soft signal received", 10
 log_first_soft_len: equ $ - log_first_soft
 log_escalate_kill: db "DEBUG: escalating to SIGKILL", 10
@@ -213,7 +215,7 @@ _start:
 .show_version:
     mov rdi, 1
     mov rsi, version_msg
-    mov rdx, 21
+    mov rdx, version_msg_len
     WRITE 1, rsi, rdx
     EXIT 0
 .set_v:

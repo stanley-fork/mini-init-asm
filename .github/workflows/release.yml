@@ -70,6 +70,8 @@ jobs:
     name: Test arm64 (native runner)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
+    # Run on all PRs, pushes to main, and tags to ensure ARM64 compatibility
+    # This validates the full epoll/signalfd path (not QEMU fallback)
     steps:
       - name: Checkout
         uses: actions/checkout@v4

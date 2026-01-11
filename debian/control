@@ -4,6 +4,7 @@ Priority: optional
 Maintainer: Debian Maintainer <debian-maint@example.org>
 Build-Depends:
  debhelper-compat (= 13),
+ make,
  binutils,
  nasm [amd64]
 Standards-Version: 4.6.2
@@ -13,7 +14,7 @@ Vcs-Browser: https://github.com/roots666/mini-init-asm
 Vcs-Git: https://github.com/roots666/mini-init-asm.git
 
 Package: mini-init-asm
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${misc:Depends}
 Description: tiny PID 1 init for containers (pure assembly)
  mini-init-asm is a tiny init intended for container entrypoints.
